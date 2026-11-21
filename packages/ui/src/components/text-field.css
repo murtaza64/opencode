@@ -51,7 +51,7 @@
       border: 1px solid var(--border-weak-base);
       background: var(--input-base);
 
-      &:focus-within:not(:has([data-readonly])) {
+      &:focus-within:not([data-field-readonly]) {
         border-color: transparent;
         /* border/shadow-xs/select */
         box-shadow:
@@ -62,12 +62,12 @@
           0 1px 3px 0 rgba(19, 16, 16, 0.12);
       }
 
-      &:has([data-invalid]) {
+      &[data-field-invalid] {
         background: var(--surface-critical-weak);
         border: 1px solid var(--border-critical-selected);
       }
 
-      &:not(:has([data-slot="input-copy-button"])) {
+      &:not([data-copyable]) {
         padding-inline-end: 0;
       }
     }

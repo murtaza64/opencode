@@ -21,6 +21,7 @@ import { host } from "./host"
 import { companionWidth, setCompanionDocked } from "./ui"
 import { DESK } from "./desk-identity"
 import { dateTime } from "./local-time"
+import { markAncestor } from "./dom-marks"
 
 export type CompanionKind = "work" | "session"
 export const companionKind = (pathname: string): CompanionKind => pathname.startsWith("/session/") ? "session" : "work"
@@ -188,6 +189,9 @@ export const DeskCompanion = () => {
     chat.setOpen(false)
     if (focused) queueMicrotask(() => document.querySelector<HTMLElement>("[data-nav=front-desk]")?.focus())
   }
+  // Docked overlay open: the page heads beneath it leave room (appearance.css), without a `:has()` on body.
+  createEffect(() => document.body.toggleAttribute("data-companion-overlay", chat.open() && floating() && !narrow()))
+  onCleanup(() => document.body.removeAttribute("data-companion-overlay"))
   return <>
   <Show when={docked()}><ResizeHandle side="companion" /></Show>
   <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label={DESK.label} aria-hidden={!chat.open()}
@@ -314,7 +318,7 @@ const ProgressItem = (props: { row: ProgressRow; open: boolean; toggle: () => vo
       <span class="desk-progress-age">{props.row.at ? ago(props.row.at) : "age unknown"}</span>
       <Show when={props.row.group === "needs"}><span class="desk-progress-ask" dir="auto">{props.row.status}</span></Show>
     </button>
-    <Show when={props.row.link}>{link => <a class="desk-progress-open" href={link().href} target={/^https?:/.test(link().href) ? "_blank" : undefined} rel="noopener noreferrer" aria-label={`Open ${link().label}`} title={`Open ${link().label}`}>↗</a>}</Show>
+    <Show when={props.row.link}>{link => <a class="desk-progress-open" ref={(el) => markAncestor(() => el, ".desk-progress", "open-link")} href={link().href} target={/^https?:/.test(link().href) ? "_blank" : undefined} rel="noopener noreferrer" aria-label={`Open ${link().label}`} title={`Open ${link().label}`}>↗</a>}</Show>
     <Show when={props.open}><dl class="desk-progress-detail">
       <dt>Status</dt><dd dir="auto">{props.row.status}</dd>
       <Show when={props.row.context}><dt>Case</dt><dd dir="auto">{props.row.context}</dd></Show>

@@ -40,6 +40,7 @@ import "./desk.css"
 // Brief rules come after the desk's, as they did inside desk.css.
 import "./brief.css"
 import { DESK } from "../desk-identity"
+import { markAncestor } from "../dom-marks"
 
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "preparing", ready: "ready", failed: "failed", unknown: "stopped" })[job.state.state]
@@ -240,7 +241,7 @@ export default function Desk() {
   if (params.view === "agents") return <Navigate href="/agents" />
   const refresh = () => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }
   // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
-  return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
+  return <main class="desk" classList={{ "desk-has-selection": !!selected() }} ref={(el) => markAncestor(() => el, ".content", "desk")}>
     <div class="desk-grid">
       {/* Status notices stay visible whatever is open: read-only answers, an unconfirmed answer to retry, brief or ignore trouble. */}
       {/* One page heading: shown above the overview, read-only for assistive tech while an item is open. */}

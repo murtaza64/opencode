@@ -92,6 +92,7 @@ import { EarlierSession, HandoffRule, type SegmentControl } from "../components/
 import { deskChain, laneChain, successionPredecessor, type Chain, type ChainLink } from "../transcript-chain"
 import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
 import { leaveComposer, ownsKey } from "../keyboard"
+import { markAncestor } from "../dom-marks"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -224,7 +225,7 @@ export default function SessionPage() {
         const [info] = createResource(() => readHost())
         return <Show when={info()}>{(page) => {
           const base = hostBase(other, page().id)
-          if (!base) return <main class="session-page"><p class="err" role="alert">Unknown host.</p></main>
+          if (!base) return <main class="session-page" ref={(el) => markAncestor(() => el, ".content", "session-page", true)}><p class="err" role="alert">Unknown host.</p></main>
           if (base === "/oc") return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} />
           const item = page().work.find((item) => item.id === other)
           return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)}
@@ -1244,6 +1245,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   let transcriptEl: HTMLDivElement | undefined
   let pageEl: HTMLElement | undefined
+  markAncestor(() => pageEl, ".content", "session-page", true)
   let inner: HTMLDivElement | undefined
   let promptEl: HTMLTextAreaElement | undefined
   const [findOpen, setFindOpen] = createSignal(false)

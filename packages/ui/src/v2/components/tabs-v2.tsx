@@ -1,4 +1,4 @@
-import { Tabs as Kobalte } from "@kobalte/core/tabs"
+import { Tabs as Kobalte, useTabsContext } from "@kobalte/core/tabs"
 import { Show, splitProps, type JSX } from "solid-js"
 import type { ComponentProps, ParentProps, Component } from "solid-js"
 import { useI18n } from "../../context/i18n"
@@ -50,10 +50,13 @@ function TabsV2List(props: TabsV2ListProps) {
 
 function TabsV2Trigger(props: ParentProps<TabsV2TriggerProps>) {
   const [split, rest] = splitProps(props, ["class", "classList", "children", "onMiddleClick", "subtext"])
+  // The wrapper mirrors its trigger's selection, so tabs-v2.css styles it without `:has()`.
+  const tabs = useTabsContext()
   return (
     <div
       data-slot="tabs-v2-trigger-wrapper"
       data-value={props.value}
+      data-trigger-selected={tabs.listState().selectedKey() === props.value ? "" : undefined}
       classList={{
         ...split.classList,
         [split.class ?? ""]: !!split.class,

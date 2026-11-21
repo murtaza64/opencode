@@ -28,11 +28,11 @@
 
   --card-accent: var(--v2-icon-icon-base);
 
-  &:has([data-slot="card-title"]) {
+  &[data-card-title] {
     gap: 8px;
   }
 
-  &:has([data-slot="card-title-icon"]) {
+  &[data-card-title-icon] {
     --card-indent: calc(var(--card-icon) + var(--card-gap));
   }
 

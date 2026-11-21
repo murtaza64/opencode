@@ -1,4 +1,6 @@
 @import "@opencode-ai/ui/styles/tailwind";
+/* packages/app renders none of es-app's markup; its own utilities (some with `:has()`) stay out of this sheet. */
+@source not "../../app";
 @import "@opencode-ai/session-ui/styles";
 @import "tw-animate-css";
 
@@ -218,8 +220,6 @@
 .pending-hint { color: var(--subtext0); font-size: 10px; }
 /* Outgoing inputs: bubbles keep their place across state changes; only the one-line cue changes. */
 .outgoing:empty { display: none; }
-.float-outgoing { flex-shrink: 0; max-height: 30%; overflow-y: auto; padding-inline: 12px; }
-.float-outgoing:has(> .outgoing:empty) { display: none; }
 .outgoing-list { list-style: none; margin: 0; padding: 0; }
 .pending-msg :is(.attachments, [role="group"]) { justify-content: flex-end; }
 .pending-msg[data-status="unknown"] .pending-bubble { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); }
@@ -464,7 +464,7 @@ button.selected { background: var(--crust); color: var(--green); box-shadow: ins
 /* shell: fixed viewport, columns scroll independently */
 .shell { display: flex; height: 100vh; }
 .content { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; }
-.content:has(.session-page) { overflow: hidden; }
+.content[data-session-page] { overflow: hidden; }
 main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 
 /* left sidebar */
@@ -627,7 +627,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .session-entry, .nav-item.archived { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .session-entry .nav-item { flex: 1; min-width: 0; }
 /* A pinned session that handed off: its successor on the second line, under the title. */
-.session-entry:has(> .handoff-next-link) { flex-wrap: wrap; contain-intrinsic-size: auto 44px; }
+.session-entry[data-handed-off] { flex-wrap: wrap; contain-intrinsic-size: auto 44px; }
 .handoff-next-link { flex-basis: 100%; min-width: 0; padding-inline: 28px 8px; padding-block-end: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
 .handoff-next-link:hover { color: var(--accent); }
 .pin-action {
@@ -667,7 +667,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .sidebar-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 4px; padding: 0 10px 6px 0; margin-bottom: 4px; border-bottom: 1px solid var(--surface0); }
 .sidebar-actions .sidebar-map-link { grid-column: 1 / -1; }
-.sidebar-actions:not(:has(.board-link)) { justify-content: flex-end; }
 .sidebar-actions .board-link { flex: 1; min-width: 0; }
 .board-link { font-weight: bold; color: var(--text); }
 .new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
@@ -1128,7 +1127,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-summary > .msg-tick { margin-inline-start: 2px; }
 .mail-unread-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent, var(--lavender)); }
 .mail-activity-summary[data-unread] .mail-activity-party { font-weight: 600; }
-.mail-activity-summary[data-unread]:has(> .mail-unread-wake) { flex-wrap: wrap; row-gap: 0; }
+.mail-activity-summary[data-unread][data-unread-line] { flex-wrap: wrap; row-gap: 0; }
 .mail-unread-wake { flex: 1 0 100%; padding-inline-start: 34px; color: var(--subtext0); font-size: 12px; line-height: 16px; white-space: normal; }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
 /* One per session above the composer while unread mail exists: "3 unread · Wake now". */
@@ -1229,10 +1228,10 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .handoff-rule > span { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .earlier-session-status { margin-block: 8px; text-align: center; font-size: 12px; color: var(--subtext1); }
 .earlier-session-plumbing > summary { cursor: pointer; font-size: 11px; color: var(--subtext0); }
-[data-component="dialog-overlay"]:has(+ [data-dialog-layer] .subagent-transcript-dialog) {
+[data-component="dialog-overlay"][data-subagent-transcript] {
   background: color-mix(in srgb, var(--crust) 65%, transparent);
 }
-[data-component="dialog"]:has(.subagent-transcript-dialog) {
+[data-component="dialog"][data-subagent-transcript] {
   [data-slot="dialog-container"] {
     width: min(calc(100vw - 24px), 980px);
     height: min(calc(100dvh - 48px), 800px);
@@ -1324,7 +1323,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   }
 }
 @media (max-width: 600px) {
-  [data-component="dialog"]:has(.subagent-transcript-dialog) {
+  [data-component="dialog"][data-subagent-transcript] {
     [data-slot="dialog-container"] { width: calc(100vw - 16px); height: calc(100dvh - 24px); }
     .subagent-transcript-dialog [data-slot="dialog-close-button"] { width: 44px; height: 44px; }
   }
@@ -1665,7 +1664,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-chip[data-unknown] .session-chip-pill { color: var(--subtext0); background: var(--surface0); border-color: var(--surface1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
 .session-chip[data-unknown] .session-chip-dot { background: var(--surface1); }
 .session-chip[data-unknown] .session-chip-title { font-weight: 400; }
-.prompt-box:has(.context-picker), .float-editor > .direct-composer:has(.context-picker) { overflow: visible; }
+.prompt-box[data-context-picker], .float-editor > .direct-composer[data-context-picker] { overflow: visible; }
 .context-picker { position: absolute; inset-inline-start: 0; bottom: 100%; z-index: 55; inline-size: min(560px, 100%); max-block-size: min(340px, 45vh);
   display: grid; grid-template-columns: minmax(0, 1fr) 210px; grid-template-rows: minmax(0, 1fr) auto; background: var(--crust);
   border: 1px solid var(--surface1); border-radius: 2px; box-shadow: 0 12px 30px -10px rgba(0,0,0,0.7); font-size: 12px; overflow: hidden; }
@@ -2150,7 +2149,7 @@ a.mini-item > .glyph { margin: 0; }
 .mode-busy { position: absolute; inset-inline-end: calc(100% + 6px); inset-block-start: 50%; translate: 0 -50%; inline-size: 6px; block-size: 6px; }
 .mode-switch.compact .mode-busy { position: absolute; inset-block-start: 4px; inset-inline-start: 4px; margin: 0; }
 /* A mail chip sits at inline-end; its fork action moves to the free side so it never covers the chip. */
-.msg-wrap:has(> .mail-activity) .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }
+.msg-wrap[data-mail-activity] .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }
 
 /* Another Work host's session in the normal view: its host beside the title, one line while it does not answer. */
 .session-page .topbar .session-host { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
@@ -2187,9 +2186,9 @@ a.mini-item > .glyph { margin: 0; }
 :is(.msg-tick-row, .receipt-line) > .msg-tick { block-size: 16px; }
 /* A transcript user message's boxes join its row, so its tick comes right after the bubble and before the
  * hover-only copy line (which keeps its space while hidden and would otherwise push the tick down). */
-.msg-wrap:has(> .msg-tick-row) { display: flex; flex-direction: column; align-items: flex-end; }
-.msg-wrap:has(> .msg-tick-row) > [data-component="user-message"] { display: contents; }
-.msg-wrap:has(> .msg-tick-row) > [data-component="user-message"] > [data-slot="user-message-copy-wrapper"] { order: 1; }
+.msg-wrap[data-tick-row] { display: flex; flex-direction: column; align-items: flex-end; }
+.msg-wrap[data-tick-row] > [data-component="user-message"] { display: contents; }
+.msg-wrap[data-tick-row] > [data-component="user-message"] > [data-slot="user-message-copy-wrapper"] { order: 1; }
 @media (prefers-reduced-motion: no-preference) { .msg-tick { transition: color 150ms; } }
 .tool-chip-partial { margin: 2px 0 4px; padding-inline-start: 28px; }
 .tool-chip-partial-label { display: block; font-size: 12px; color: var(--subtext0); }

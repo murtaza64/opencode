@@ -18,6 +18,7 @@ import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief
 import { briefSemantics, hudPages, SCENE_CUE, type BriefNode, type BriefNodeGroup, type PicturePart } from "../brief-view"
 import { BriefHud } from "./brief-hud"
 import { DESK } from "../desk-identity"
+import { markAncestor } from "../dom-marks"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
@@ -74,7 +75,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </>}</Show>
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
       {/* The question itself is the card's heading; the lead adds only context and the picture. */}
-      <Show when={complete() && ready()}>{value => <div class="desk-brief-body">
+      <Show when={complete() && ready()}>{value => <div class="desk-brief-body" ref={(el) => markAncestor(() => el, ".desk-brief", "body")}>
         {/* Record state apart from authority, from the record itself; the same node heads the glasses' first page. */}
         <For each={group("authority")}>{node => <p class="brief-authority" data-node={node.id}><For each={node.strip}>{segment => <span data-tone={segment.startsWith("◇") ? "recommended" : segment.startsWith("✓") ? "chosen" : /unverified|no option/.test(segment) ? "unknown" : /^[A-Z]/.test(segment) ? "record" : undefined}>{segment}</span>}</For></p>}</For>
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
@@ -321,7 +322,7 @@ const Scene = (props: { nodes: BriefNode[] }) => {
     </div>
   }
   return <div class="brief-scene" aria-label="Who and what this involves">
-    <Show when={roots().some(node => acting(entity(node)!.id))}><div class="brief-scene-actors"><p class="brief-scene-head">Who would act</p>
+    <Show when={roots().some(node => acting(entity(node)!.id))}><div class="brief-scene-actors" ref={(el) => markAncestor(() => el, ".brief-scene", "actors")}><p class="brief-scene-head">Who would act</p>
       <For each={roots().filter(node => acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div></Show>
     <div class="brief-scene-places"><p class="brief-scene-head">Where</p><For each={roots().filter(node => !acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div>
     <Show when={nodes().some(node => node.part.role === "limit")}><ul class="brief-scene-limits"><For each={nodes().filter(node => node.part.role === "limit")}>{node =>
@@ -379,12 +380,12 @@ const frameStyle = (svg: boolean) => {
     + (svg ? "body{margin:0}svg{display:block;inline-size:100%;block-size:auto}" : "body{margin:8px}svg{display:block;max-inline-size:min(100%,640px);block-size:auto}")
 }
 /** A brief's drawing in a sandboxed frame. SVG stays at or below its viewBox width; legacy HTML keeps its height. */
-export const Visual = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number }) =>
+export const Visual = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number; ref?: (el: HTMLElement) => void }) =>
   <VisualFrame {...props} />
 
-const VisualFrame = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number }) => {
+const VisualFrame = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number; ref?: (el: HTMLElement) => void }) => {
   const [expanded, setExpanded] = createSignal(false)
-  return <figure class={props.class ?? "desk-visual"} data-kind={props.svg ? "svg" : "html"}>
+  return <figure ref={(el) => props.ref?.(el)} class={props.class ?? "desk-visual"} data-kind={props.svg ? "svg" : "html"}>
     <div class={props.svg ? "desk-visual-window" : undefined} data-expanded={expanded() ? "" : undefined}>
     <iframe title={props.alt || props.title || "Brief visual"} sandbox="" referrerpolicy="no-referrer" loading="lazy"
       style={props.svg ? { "inline-size": "100%", "max-inline-size": `${props.maxWidth ?? contract.visual.width}px`, "aspect-ratio": `1 / ${props.aspect}`, "block-size": "auto" } : { "block-size": `${(props.height ?? 280) + FRAME_MARGIN * 2}px` }}
@@ -398,8 +399,10 @@ const VisualFrame = (props: { title: string; alt?: string; svg?: string; aspect?
 /** An option's small mockup: contract-4 SVG by its viewBox, or a legacy HTML sketch at a fixed height. */
 export const Sketch = (props: { title: string; sketch: string }) => {
   const aspect = () => safeSvg(props.sketch, contract.visual.sketch.width, contract.visual.sketch.height, contract.visual.sketch.maxBytes)
-  return <Show when={aspect()} fallback={<Visual class="home-option-sketch" title={props.title} html={props.sketch} height={180} />}>{value =>
-    <Visual class="home-option-sketch" title={props.title} svg={props.sketch} aspect={value()} maxWidth={contract.visual.sketch.width} />}</Show>
+  // The option card, its list, the answer and the decision widen for a sketch (desk.css).
+  const mark = (el: HTMLElement) => { for (const host of [".home-option-card", ".home-option-cards", ".home-answer", ".home-decision"]) markAncestor(() => el, host, "sketch") }
+  return <Show when={aspect()} fallback={<Visual class="home-option-sketch" title={props.title} html={props.sketch} height={180} ref={mark} />}>{value =>
+    <Visual class="home-option-sketch" title={props.title} svg={props.sketch} aspect={value()} maxWidth={contract.visual.sketch.width} ref={mark} />}</Show>
 }
 
 /** Asks the desk conversation to explain this item further, with an optional question. Only an explicit

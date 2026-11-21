@@ -18,6 +18,8 @@ function ToastV2Region(props: ToastV2RegionProps) {
         const hidden = element.dataset.visible === "false"
         element.inert = hidden
         element.tabIndex = hidden ? -1 : 0
+        // Sonner's icon slot widens the grid (toast-v2.css); marked here instead of a `:has()` rule.
+        element.toggleAttribute("data-has-icon", !!element.querySelector(":scope > [data-icon]"))
       })
     }
     let connected = false

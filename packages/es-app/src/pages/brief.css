@@ -33,7 +33,7 @@
 .desk-brief-detail h3 { font-size: 11px !important; font-weight: 400 !important; color: var(--ds-muted, var(--subtext0)); margin-block: 8px 2px !important; }
 .desk-visual iframe { block-size: 220px; resize: vertical; overflow: auto; }
 /* Until a brief is ready, its slot is a status line or one button, not an empty panel. */
-.desk-brief:not(:has(.desk-brief-body)) { padding: 0; background: none; border: 0; margin-block-start: 10px; }
+.desk-brief:not([data-body]) { padding: 0; background: none; border: 0; margin-block-start: 10px; }
 .home-decision .desk-brief-ask { font-size: 13px !important; font-weight: 600; }
 .home-decision .desk-brief[data-part] { margin: 0; padding: 0; border: 0; background: none; }
 .desk-brief-after { display: flex; flex-direction: column; gap: 6px; margin-block: 10px 8px; }
@@ -179,7 +179,7 @@
 /* A scene by domain role (brief-view sceneNodes): type and spacing carry structure; colour is the semantic role from
  * the design-system tokens (palette-aware); the only outlines are the account fence and the proposed message. */
 .brief-scene { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 28px; margin: 10px 0 6px; font-size: 13px; }
-.brief-scene:not(:has(.brief-scene-actors)) { grid-template-columns: minmax(0, 1fr); }
+.brief-scene:not([data-actors]) { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 600px) { .brief-scene { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
 .brief-scene-actors, .brief-scene-places { display: grid; align-content: start; gap: 14px; min-inline-size: 0; }
 .brief-scene-head { margin: 0 !important; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)); }

@@ -28,6 +28,7 @@ import { TodayCost } from "./today-cost"
 import { waveStart } from "../wave"
 import { UnifiedSidebar, type RecentAgent } from "./nav-tabs"
 import { clockTime } from "../local-time"
+import { focusRing } from "../dom-marks"
 
 /** Project scope for browsing (the same dashboard scope New session targets): a chip in the Agents filter row
  * that opens a short list of projects. Escape or choosing closes it and returns focus to the chip. */
@@ -85,19 +86,19 @@ const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: st
     <Show when={shown()}><div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
       <Show when={props.hosts.length > 1}>
         <fieldset class="sidebar-filter-list"><legend>Hosts</legend><For each={props.hosts}>{(item) =>
-          <label><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
+          <label data-checked={props.shownHost(item.id) ? "" : undefined}><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} {...focusRing} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
       </Show>
       <fieldset class="sidebar-filter-list" data-single><legend>Project</legend>
-        <label><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} /><span>All projects</span></label>
+        <label data-checked={allProjects() ? "" : undefined}><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} {...focusRing} /><span>All projects</span></label>
         <For each={editspaces()?.editspaces ?? []}>{(item) =>
-          <label><input type="radio" name="sidebar-project" checked={!allProjects() && current() === item.name} onChange={() => { props.onScope?.(); setEditspace(item.name) }} /><bdi dir="auto">{item.name}</bdi></label>}</For>
+          <label data-checked={!allProjects() && current() === item.name ? "" : undefined}><input type="radio" name="sidebar-project" checked={!allProjects() && current() === item.name} onChange={() => { props.onScope?.(); setEditspace(item.name) }} {...focusRing} /><bdi dir="auto">{item.name}</bdi></label>}</For>
       </fieldset>
       <fieldset class="sidebar-filter-segments"><legend>Show</legend>
-        <label><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} /><span>All agents</span></label>
-        <label><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} /><span>Working now</span></label>
+        <label data-checked={!props.activeOnly ? "" : undefined}><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} {...focusRing} /><span>All agents</span></label>
+        <label data-checked={props.activeOnly ? "" : undefined}><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} {...focusRing} /><span>Working now</span></label>
       </fieldset>
       <fieldset class="sidebar-filter-segments"><legend>Sort</legend><For each={props.sorts}>{([value, label]) =>
-        <label><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} /><span>{label}</span></label>}</For></fieldset>
+        <label data-checked={props.sortBy === value ? "" : undefined}><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} {...focusRing} /><span>{label}</span></label>}</For></fieldset>
       <div class="sidebar-filter-actions"><button type="button" disabled={!changed()} onClick={clear}>Clear</button><button type="button" class="sidebar-filter-done" onClick={close}>Done</button></div>
     </div>
     </Show>
@@ -486,7 +487,7 @@ export default function Sidebar() {
       <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
     </a>
   ) : (
-    <div class="session-entry" {...peekAttrs(s)}
+    <div class="session-entry" {...peekAttrs(s)} data-active={isOpen(s) ? "" : undefined}
       data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
       data-preview-agent={s.title || s.id} data-preview-owner={`in ${s.project ?? current()}`} data-preview-host={ownHost().label}
       data-preview-meta={[dotText(s, dot()), s.directory].filter(Boolean).join(" · ")}>
@@ -534,7 +535,8 @@ export default function Sidebar() {
       return { id: edge.successor, title: row?.title || edge.successor, directory: row?.directory ?? s.directory }
     }
     return (
-    <div class="session-entry host-entry" classList={{ unavailable: down() }}
+    <div class="session-entry host-entry" classList={{ unavailable: down() }} data-active={isOpen(s) ? "" : undefined}
+      data-handed-off={feed && handedOff() ? "" : undefined}
       data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
       data-preview-agent={s.title || s.id} data-preview-owner={`on ${label()}`} data-preview-host={label()}
       data-preview-meta={[dot(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}>

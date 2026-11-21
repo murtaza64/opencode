@@ -70,7 +70,7 @@ export const MailSummary = (props: {
   const wake = () => props.tick ? undefined : props.wake
   const said = () => props.tick?.label.replaceAll("\n", "; ") ?? wake()?.label
   return <summary class="mail-activity-summary" data-wake={wake()?.state} data-compact={compact() && !props.unread?.line ? "true" : undefined}
-    data-unread={props.unread ? "true" : undefined}
+    data-unread={props.unread ? "true" : undefined} data-unread-line={props.unread?.line ? "" : undefined}
     title={[relativeTime(props.sentAt), props.tick?.label ?? wake()?.label].filter(Boolean).join(" · ") || undefined}
     aria-label={`${props.unread ? "Unread mail" : "Mail"}${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${said() ? `, ${said()}` : ""}${props.unread?.line ? `, ${props.unread.line}` : ""}`}>
     <Show when={props.unread}><span class="mail-unread-dot" aria-hidden="true" /></Show>

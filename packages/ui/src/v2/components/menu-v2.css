@@ -1,8 +1,5 @@
-/* Above modal dialogs (z-index 50); matches select-v2-content. */
-[data-popper-positioner]:has([data-component="menu-v2-content"]) {
-  z-index: 60;
-}
-
+/* Above modal dialogs (z-index 50); matches select-v2-content. Kobalte copies the content's z-index onto its
+ * positioner before the first paint. */
 [data-component="menu-v2-content"] {
   box-sizing: border-box;
   display: flex;
