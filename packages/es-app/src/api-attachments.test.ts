@@ -43,3 +43,9 @@ test("a compact page's large file part loads from its own host's part file route
   expect(fileUrl(attachmentsUnder("/oc", [filePart(fileRoute)])[0]!)).toBe(fileRoute)
   expect(fileUrl(attachmentsUnder("/oc", [filePart(`${fileRoute}/../x`, meta)])[0]!)).toBe(`${fileRoute}/../x`)
 })
+
+test("a sxpozrzx+ file reference (?bytes=N, no metadata) resolves under the client's base", () => {
+  const ref = "/session/ses_a/message/msg_a/part/prt_a/file?bytes=1430000"
+  expect(fileUrl(attachmentsUnder("/hosts/mini/oc", [filePart(ref)])[0]!)).toBe(`/hosts/mini/oc${ref}`)
+  expect(fileUrl(attachmentsUnder("/oc", [filePart(`${ref}&x=1`)])[0]!)).toBe(`${ref}&x=1`)
+})

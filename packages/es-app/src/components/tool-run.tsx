@@ -11,6 +11,7 @@ import { Glyph } from "./icons"
 import { TickMark } from "./message-tick"
 import { ocAt } from "../api"
 import { useSessionHost } from "../session-host"
+import { hydrate } from "../page-parts"
 
 const STRIP_ICONS = 12
 
@@ -149,6 +150,8 @@ export const ToolRun = (props: {
           const member = byPart().get(partID)!
           const item = createMemo(() => members().get(partID))
           const parts = createMemo(() => item() ? [item()!.part] : [], [], { equals: (a, b) => a[0] === b[0] })
+          // An opened run shows each member's real output: a call a compact page shortened is read in full once.
+          createEffect(() => { const part = item()?.part; if (part) hydrate(part) })
           return <div class="tool-run-member" data-tool-run-member={member.partID} data-call-id={member.callID}
             data-message-id={member.messageID} data-find-selected={props.selectedPart === member.partID ? "true" : undefined}>
             <Show when={props.selectedPart === member.partID}>{props.excerpt}</Show>
@@ -205,7 +208,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       button?.focus()
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
-      onClick={() => setOpen(!open())}>
+      onClick={() => { if (!open()) hydrate(props.part); setOpen(!open()) }}>
       <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} running={props.part.state.status === "running"} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">

@@ -8,6 +8,7 @@ import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/s
 import { ocAt } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 import { anchorValid } from "./message-anchor"
+import { registerHydrator } from "./page-parts"
 import { perfSpan, perfTimed } from "./perf-telemetry"
 
 export const TAIL = 80
@@ -568,8 +569,14 @@ export function createLiveSession(
     }
   }
   subscribe()
+  const unregister = registerHydrator(sessionID, async (messageID, partID) => {
+    const part = await oc.part(sessionID, directory, messageID, partID, controller.signal)
+    // Replaces the shortened copy exactly as a live part update would; a newer live update has already done so.
+    if (part && !disposed) apply({ type: "message.part.updated", properties: { sessionID, part } })
+  })
   onCleanup(() => {
     disposed = true
+    unregister()
     controller.abort()
     clearTimeout(retryTimer)
     source?.close()

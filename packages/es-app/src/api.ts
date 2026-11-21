@@ -61,26 +61,27 @@ async function json<T>(res: Response): Promise<T> {
 
 type Page = { items: MessageWithParts[]; cursor?: string }
 
-// Compact pages (`compact=true`, Core cf0e31b2+) bound long tool output and replace large inline tool attachments with
-// that Core's attachment route (`/session/<id>/message/<mid>/part/<pid>/attachment/<i>`), relative to the Core; it is
-// resolved under this client's base (`/oc`, or `/hosts/<id>/oc` for another host) so an image loads from its own host.
+// Compact pages (`compact=true`) bound long tool output (state.metadata.pageTruncated; oc.part reads one in full) and
+// replace large file data and tool attachments with Core routes, relative to the Core; they are resolved under this
+// client's base (`/oc`, or `/hosts/<id>/oc` for another host) so an image loads from its own host. Two Core shapes:
+// cf0e31b2 (`.../file` with metadata.compactFile; `.../attachment/<i>`) and sxpozrzx+ (`.../file?bytes=N`).
 // An older Core ignores the parameter and answers full parts, which pass through unchanged.
 const ATTACHMENT = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/
-// A large file part (a pasted screenshot) on a compact page (runtime-lag #895): its url is Core's part file route and
-// metadata.compactFile carries its sizes.
-const FILE_ROUTE = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file$/
+const FILE_ROUTE = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file(\?bytes=\d{1,12})?$/
+/** A file part whose data is a Core file route (before or after resolving under a base). */
+export const fileReference = (url: string) => /\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file(\?bytes=\d{1,12})?$/.test(url)
 export const compactFile = (part: MessageWithParts["parts"][number]) =>
-  part.type === "file" && FILE_ROUTE.test(part.url) && !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile
+  part.type === "file" && FILE_ROUTE.test(part.url) && (/\?bytes=/.test(part.url) || !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile)
 export const attachmentsUnder = (base: string, items: MessageWithParts[]) => items.map((message) => {
   const routed = (part: MessageWithParts["parts"][number]) => compactFile(part) ||
-    (part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url)))
+    (part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url) || FILE_ROUTE.test(file.url)))
   if (!message.parts.some(routed)) return message
   return {
     ...message,
     parts: message.parts.map((part) => part.type === "file" && compactFile(part) ? { ...part, url: `${base}${part.url}` }
       : !routed(part) || part.type !== "tool" || part.state.status !== "completed" ? part : {
       ...part,
-      state: { ...part.state, attachments: part.state.attachments!.map((file) => ATTACHMENT.test(file.url) ? { ...file, url: `${base}${file.url}` } : file) },
+      state: { ...part.state, attachments: part.state.attachments!.map((file) => ATTACHMENT.test(file.url) || FILE_ROUTE.test(file.url) ? { ...file, url: `${base}${file.url}` } : file) },
     }),
   }
 })
@@ -233,6 +234,13 @@ const ocFor = (base: string) => ({
 
   messagesPage: (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) =>
     sharedPage(base, id, directory, limit, before, signal, true),
+
+  /** One full part, for a part a compact page shortened; undefined when it no longer exists. */
+  part: async (id: string, directory: string, messageID: string, partID: string, signal?: AbortSignal) => {
+    const res = await fetch(`${base}/session/${id}/message/${encodeURIComponent(messageID)}/part/${encodeURIComponent(partID)}?${q(directory)}`, { signal })
+    if (res.status === 404 || res.status === 400) return undefined
+    return attachmentsUnder(base, [{ parts: [await json<Part>(res)] } as MessageWithParts])[0]!.parts[0]!
+  },
 
   /** Undefined when the session has no such message (404, or 400 for a malformed ID). */
   message: async (id: string, directory: string, messageID: string, signal?: AbortSignal) => {

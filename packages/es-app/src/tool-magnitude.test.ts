@@ -39,6 +39,13 @@ describe("tool magnitude", () => {
     expect(toolMagnitude(part).kind).toBe("running")
   })
 
+  // A compact message page keeps 8 KB of a long output; the size badge still reflects the whole output.
+  test("a page-bounded output is sized by its recorded original length", () => {
+    const part = completed({}, "x".repeat(8_200))
+    ;(part.state as { metadata: Record<string, unknown> }).metadata = { pageTruncated: { output: 40_000 } }
+    expect(toolMagnitude(part)).toMatchObject({ kind: "sized", size: "XL", output: 40_000 })
+  })
+
   test("compacted output is unknown, not small", () => {
     const magnitude = toolMagnitude(completed({}, "[cleared]", { compacted: 5 }))
     expect(magnitude).toMatchObject({ kind: "unknown" })

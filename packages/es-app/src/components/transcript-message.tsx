@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Index, Match, Show, Switch, type Compone
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
+import { fileReference } from "../api"
 import { mailActionableStatus, mailActivityLabel, mailChipWake, mailSentAt, mailWake, mailWakeLabel } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { ChatImages } from "./chat-images"
@@ -59,7 +60,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     part.metadata?.source === "front-desk/succession"))
   // Attached user images render through ChatImages, the same component as the outgoing bubble.
   const imagePart = (part: ComponentProps<typeof Message>["parts"][number]) => props.message.role === "user" &&
-    part.type === "file" && part.mime.startsWith("image/") && (part.url.startsWith("data:") || !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile) &&
+    part.type === "file" && part.mime.startsWith("image/") && (part.url.startsWith("data:") || fileReference(part.url)) &&
     part.source?.text?.start === undefined
   const images = createMemo(() => props.parts.flatMap(part => imagePart(part) && part.type === "file"
     ? [{ url: part.url, mime: part.mime, ...(part.filename ? { filename: part.filename } : {}) }] : []),

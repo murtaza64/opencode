@@ -38,7 +38,10 @@ export const toolMagnitude = (part: ToolPart): ToolMagnitude => {
   if (typeof state.output !== "string") return { kind: "unknown", reason: "output is not available", ms }
   // A truncated shell result persisted only part of its output: the size is a lower bound.
   const truncated = state.metadata?.truncated === true
-  return sized({ chars: input.chars, partial: input.partial || truncated }, state.output.length, state.attachments?.length ?? 0, ms)
+  // A compact page bounded the output; its original length is recorded beside it.
+  const paged = (state.metadata?.pageTruncated as { output?: unknown } | undefined)?.output
+  const output = typeof paged === "number" ? paged : state.output.length
+  return sized({ chars: input.chars, partial: input.partial || truncated }, output, state.attachments?.length ?? 0, ms)
 }
 
 export const magnitudeLabel = (magnitude: ToolMagnitude) => {
