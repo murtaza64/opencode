@@ -249,4 +249,4 @@ const readable = (color: string, background: string, target: number) => {
     if (contrast(candidate, background) >= target) return candidate
   }
   return "#ffffff"
-          }
+}
