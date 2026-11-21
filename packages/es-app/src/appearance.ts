@@ -15,6 +15,8 @@ export type Appearance = {
   wallpaper?: string
   // WalStudio's dim of that image toward black (0-0.8); absent: none.
   dim?: number
+  // WalStudio's tint of that image toward the palette background (0-1); absent: none.
+  tint?: number
   updatedAt?: number
 }
 
@@ -134,6 +136,10 @@ const apply = () => {
       root.style.setProperty("--wallpaper-dim", String(value.dim))
       applied.push("--wallpaper-dim")
     }
+    if (value.tint) {
+      root.style.setProperty("--wallpaper-tint", String(value.tint))
+      applied.push("--wallpaper-tint")
+    }
   }
 }
 
@@ -142,6 +148,13 @@ const apply = () => {
 export const wallpaperDim = (look: unknown) => {
   const dim = look && typeof look === "object" ? (look as { dim?: unknown }).dim : undefined
   return typeof dim === "number" && Number.isFinite(dim) && dim > 0 ? Math.min(dim, 0.8) : undefined
+}
+
+/** WalStudio's wallpaper tint from the served look: a number held to Studio's 0-1; anything else is no tint. It reaches
+ * CSS text, so it is re-checked here. */
+export const wallpaperTint = (look: unknown) => {
+  const tint = look && typeof look === "object" ? (look as { tint?: unknown }).tint : undefined
+  return typeof tint === "number" && Number.isFinite(tint) && tint > 0 ? Math.min(tint, 1) : undefined
 }
 
 /** The `<style id="wal-palette">` text for a palette: `--wal-<role>` (underscores as hyphens), `--wal-hl1..8`,
@@ -196,7 +209,7 @@ export const installAppearance = () => {
     if (stopped || !response?.ok) return
     const body = await response.json().catch(() => undefined)
     if (!body || typeof body.palette !== "object" || !body.palette) return
-    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, dim: wallpaperDim(body.look), wal: body.wal, updatedAt: body.updatedAt })
+    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, dim: wallpaperDim(body.look), tint: wallpaperTint(body.look), wal: body.wal, updatedAt: body.updatedAt })
     applyWal(body.wal)
     apply()
     acknowledge()

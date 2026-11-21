@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { contrast, themeVars, walStyle, wallpaperDim } from "./appearance"
+import { contrast, themeVars, walStyle, wallpaperDim, wallpaperTint } from "./appearance"
 
 // The viewing laptop's pywal output for hades-2-mel.png (abridged).
 const hades = {
@@ -63,6 +63,16 @@ describe("wal-palette/1 stylesheet", () => {
     expect(walStyle({ ...wal, roles: { "bg;x": "#000000", fg: "#ffffff" } })).toBe(':root{--wal-revision:"cb3d9b633c08";--wal-fg:#ffffff;--wal-hl1:#3b61ad;--wal-hl2:#3763c9;--wal-ok-risk-cvd-safe:1}')
     expect(walStyle(undefined)).toBeUndefined()
     expect(walStyle({ revision: "r", roles: {} })).toBeUndefined()
+  })
+})
+
+describe("WalStudio wallpaper tint", () => {
+  test("a served tint is kept within Studio's range", () => {
+    expect([wallpaperTint({ blur: 8, tint: 0.95 }), wallpaperTint({ tint: 3 })]).toEqual([0.95, 1])
+  })
+
+  test("no look, no tint, zero or a non-number gives no tint", () => {
+    expect([undefined, {}, { tint: 0 }, { tint: -1 }, { tint: "0.5" }, { tint: Number.NaN }, { tint: "0.5); x" }].map(wallpaperTint)).toEqual(Array(7).fill(undefined))
   })
 })
 
