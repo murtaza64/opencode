@@ -132,6 +132,14 @@ function omitted(attachment: { mime: string; filename?: string }) {
   return `[${attachment.mime.startsWith("image/") ? "image" : attachment.mime}: ${attachment.filename ?? "file"} omitted]`
 }
 
+// User messages with no assistant turn between them (an unanswered or interrupted turn, then a new prompt) are merged
+// into one user turn by the AI SDK or the provider, and their text ran together ("test" + "test" read "testtest"). A
+// later message in such a run opens with this marker. It derives only from the stored creation time, so a rendered
+// history never changes once sent, and the message before it keeps its bytes (the cached prefix stays intact).
+function separator(created: number) {
+  return `[Separate user message, sent ${new Date(created).toISOString().slice(0, 16).replace("T", " ")}Z]`
+}
+
 function providerMeta(metadata: Record<string, any> | undefined) {
   if (!metadata) return undefined
   const { providerExecuted: _, ...rest } = metadata
@@ -263,6 +271,9 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           })
         }
       }
+      const previous = result.findLast((item) => item.parts.some((part) => part.type !== "step-start"))
+      if (userMessage.parts.length > 0 && previous?.role === "user")
+        userMessage.parts.unshift({ type: "text", text: separator(msg.info.time.created) })
       if (userMessage.parts.length > 0) result.push(userMessage)
     }
 
