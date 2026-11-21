@@ -1,5 +1,6 @@
 /* This laptop's desktop appearance (pywal): the palette from ~/.cache/wal/colors.json, a small
- * pre-blurred copy of its wallpaper (WalStudio's `studio` blur and dim when colors.json names them), and the wal-palette/1 artifact roles from palette.json beside
+ * pre-blurred copy of its wallpaper (WalStudio's `studio` blur when colors.json names one; its dim and tint ride along for
+ * pages to paint), and the wal-palette/1 artifact roles from palette.json beside
  * it, served to app pages at fixed routes. Only the file pywal names is read, only as an image, and
  * only on this machine; host tabs show the same local look, never an execution host's palette. */
 import { unwatchFile, watchFile } from "node:fs"
@@ -8,9 +9,9 @@ import path from "node:path"
 
 /** wal-palette/1 (pywal docs/wal-palette.md): role colours artifacts use as `--wal-<role>`. */
 export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Record<string, string>; highlights: string[]; okRiskCvdSafe: boolean }
-/** WalStudio's wallpaper look from colors.json `studio`: blur sigma in pixels of the full image (0-64) and dim toward
- * black (0-0.8), the ranges Studio writes. */
-export type StudioLook = { blur: number; dim: number }
+/** WalStudio's wallpaper look from colors.json `studio`: blur sigma in pixels of the full image (0-64), dim toward
+ * black (0-0.8) and tint toward the palette background (0-1), the ranges Studio writes. Missing dim/tint are 0. */
+export type StudioLook = { blur: number; dim: number; tint: number }
 export type AppearanceState = { palette: Record<string, string>; wallpaper?: string; wal?: WalPalette; look?: StudioLook; updatedAt: number }
 
 /** How a Studio look is rendered: resize the image to `work` pixels wide, blur there with `sigma` (work pixels; 0 = none),
@@ -195,7 +196,7 @@ const lookOf = (raw: unknown): StudioLook | undefined => {
   const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined
   const blur = number(record.blur)
   if (blur === undefined) return undefined
-  return { blur: Math.max(0, Math.min(blur, 64)), dim: Math.max(0, Math.min(number(record.dim) ?? 0, 0.8)) }
+  return { blur: Math.max(0, Math.min(blur, 64)), dim: Math.max(0, Math.min(number(record.dim) ?? 0, 0.8)), tint: Math.max(0, Math.min(number(record.tint) ?? 0, 1)) }
 }
 
 // wal-palette/1, colour values only: anything else in the file (terminal, checks, prose) is dropped.
