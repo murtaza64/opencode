@@ -63,7 +63,7 @@ test("a partial write keeps the last good palette; a real change notifies once a
   await reader.cancel()
 })
 
-test("WalStudio's blur and dim in colors.json shape the served wallpaper; without them the app's own blur stays", async () => {
+test("WalStudio's blur, dim and tint in colors.json shape the served wallpaper; without them the app's own blur stays", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-look-"))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const wallpaper = path.join(directory, "wall.png")
@@ -80,14 +80,14 @@ test("WalStudio's blur and dim in colors.json shape the served wallpaper; withou
     await writeFile(path.join(directory, "colors.json"), withLook(studio))
     for (let wait = 20; JSON.stringify(appearance.body()?.look) !== JSON.stringify(look); wait *= 2) await Bun.sleep(wait)
   }
-  await settle({ blur: 8, tint: 0.95, dim: 0.3 }, { blur: 8, dim: 0.3 })
+  await settle({ blur: 8, tint: 0.95, dim: 0.3 }, { blur: 8, dim: 0.3, tint: 0.95 })
   expect(calls).toEqual([undefined, 8])
   const first = appearance.body()?.wallpaper
-  // Only a new blur reblurs (and gets a new image version); dim alone is applied by the page over the same image.
-  await settle({ blur: 8, dim: 0.5 }, { blur: 8, dim: 0.5 })
+  // Only a new blur reblurs (and gets a new image version); dim and tint alone are painted by the page over the same image.
+  await settle({ blur: 8, dim: 0.5, tint: 0.2 }, { blur: 8, dim: 0.5, tint: 0.2 })
   expect([calls, appearance.body()?.wallpaper]).toEqual([[undefined, 8], first])
   // Out-of-range values are held to Studio's own ranges.
-  await settle({ blur: 200, dim: 3 }, { blur: 64, dim: 0.8 })
+  await settle({ blur: 200, dim: 3, tint: 7 }, { blur: 64, dim: 0.8, tint: 1 })
   expect(appearance.body()?.wallpaper).not.toBe(first)
   // A look that is not numbers is no look: the app's own blur again.
   await settle({ blur: "16", dim: 0.2 }, undefined)
