@@ -47,7 +47,7 @@ const writes = []
 page.on("pageerror", (error) => errors.push(error.message))
 page.on("request", (request) => { if (!["GET", "HEAD", "OPTIONS"].includes(request.method()) && /attention|deliverables\/seen/.test(request.url()) && !/\/attention\/session$/.test(request.url())) writes.push(request.url()) })
 const sidebar = page.locator("nav.sidebar")
-const recent = sidebar.locator("[role=tabpanel] .recent-list")
+const recent = sidebar.locator("[role=tabpanel] .recent-list:not(.active-list)")
 const card = sidebar.locator(".sidebar-preview")
 
 /** Every Recent row's leading icon, title and time, as inline-start / inline-end offsets from the list. */

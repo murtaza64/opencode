@@ -375,7 +375,7 @@ export default function Sidebar() {
     if (row.kind === "cloud") {
       const pin = cloudPin(row.item)
       if (!pin) return []
-      return [{ key: `wingman:${row.item.key}`, title: pin.lane, updated: row.item.changedAt,
+      return [{ key: `wingman:${row.item.key}`, title: pin.lane, updated: row.item.changedAt, active: row.item.status.chip === "busy",
         node: <CloudNav pin={pin} />,
         preview: { kind: "Agent", title: pin.lane, agent: pin.lane, owner: pin.editspace, host: "Wingman", meta: row.item.status.chip } }]
     }
@@ -386,6 +386,8 @@ export default function Sidebar() {
       key: hostRowKey(s),
       title: s.title || s.id,
       updated: s.turnAt ?? s.updated,
+      // Running now: a turn in progress, or waiting on a permission or question (the same status stream as the dot).
+      active: state === "busy" || state === "pending",
       node: item(s),
       preview: { kind: "Agent", title: s.title || s.id, agent: s.title || s.id,
         owner: s.host ? `on ${feed?.host.label ?? s.host}` : `in ${s.project ?? current()}`,

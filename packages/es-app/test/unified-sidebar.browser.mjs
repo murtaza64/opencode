@@ -60,7 +60,7 @@ page.on("request", (request) => { if (!["GET", "HEAD", "OPTIONS"].includes(reque
 const sidebar = page.locator("nav.sidebar")
 const band = sidebar.getByRole("region", { name: "Needs you" })
 const panel = sidebar.locator("[role=tabpanel]")
-const recent = panel.locator(".recent-list")
+const recent = panel.locator(".recent-list:not(.active-list)")
 const chips = sidebar.getByRole("tablist", { name: "Browse" })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 300_000 })
@@ -83,7 +83,7 @@ try {
   await expect(recent.locator(".session-entry").first()).toBeVisible()
   await expect(recent.locator(".nav-surface").first()).toBeVisible()
   await expect(recent.locator(".nav-history-row").first()).toBeVisible()
-  await expect(recent.locator(".session-entry[data-avatar]").first()).toBeVisible()
+  await expect(recent.locator(".session-entry .session-avatar").first()).toBeVisible()
   await expect(recent.locator(".nav-surface .surface-glyph").first()).toBeVisible()
   // Decision diamond and permission shield are shapes, not only colour.
   const diamond = await band.locator(".nav-decision[data-kind=decision] .nav-kind").first().evaluate((element) => getComputedStyle(element, "::before").transform)
@@ -133,7 +133,8 @@ try {
   preview.fixture.emit("fixture.changed", {})
   // Surfaces poll every 15 s; wait for the refetch this test is about.
   await expect(sidebar.locator(".new-items")).toContainText("1 new", { timeout: 60_000 })
-  assert.deepEqual(await recent.locator(".nav-title").allTextContents(), before, "refetch did not reorder the list under the pointer")
+  // Held order; the new row follows at the end (it never jumps in under the pointer), the pill offers its place.
+  assert.deepEqual(await recent.locator(".nav-title").allTextContents(), [...before, "Brand new board"], "refetch did not reorder the list under the pointer")
   assert.equal(await recent.locator(`.recent-row[data-nav-key="${hovered}"] .nav-title`).count(), 1)
   await page.mouse.move(600, 400)
   await expect(recent.getByText("Brand new board")).toBeVisible()

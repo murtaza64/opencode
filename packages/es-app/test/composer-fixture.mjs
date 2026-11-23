@@ -115,6 +115,8 @@ export const createFixture = async () => {
     createReplies: [],
     created: [],
     workspaceSessions: [],
+    /** Extra /session/status entries (sessionID -> { type }). */
+    extraStatus: {},
     emit(type, properties) {
       for (const response of streams) response.write(`data: ${JSON.stringify({ type, properties })}\n\n`)
     },
@@ -351,7 +353,7 @@ export const createFixture = async () => {
             time: { ...(typeof value === "string" ? session(value).time : value.time), ...(fixture.archived.has(typeof value === "string" ? value : value.id) ? { archived: 5 } : {}) },
           })),
       )
-    if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
+    if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" }, ...fixture.extraStatus })
     // Title-bar daily spend (today-cost.ts): an older Core without the route; the badge stays hidden.
     if (url.pathname === "/experimental/usage/daily") return json({ error: "Not found" }, 404)
     if (url.pathname === "/config/providers")

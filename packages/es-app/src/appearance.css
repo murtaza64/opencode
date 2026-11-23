@@ -800,8 +800,12 @@ body[data-companion-overlay] :is(.surface-head, .desk-evidence-head) { padding-i
 :root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item { padding-inline: var(--row-icon-gap) var(--row-end); gap: 6px; }
 :root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item > :is(.dot, .cloud-runtime-icon, .host-glyph) { display: none; }
 :root .recent-list :is(.session-entry, .cloud-nav-entry) > .pin-action { position: absolute; inset-inline-end: 4px; inset-block-start: 50%; transform: translateY(-50%); margin: 0; background: var(--mantle); border-radius: 4px; }
-:root .recent-list :is(.session-entry, .cloud-nav-entry):not(:hover, :focus-within) > .pin-action:not(.pinned) { pointer-events: none; }
 :root .recent-list .recent-row > .nav-item { padding-inline: var(--row-icon-start) var(--row-end); gap: var(--row-icon-gap); }
 :root .recent-list .recent-row > .nav-item > :is(.nav-kind, .surface-glyph):first-child { margin-inline: calc((var(--row-icon) - 18px) / 2); }
 :root .recent-list .nav-title { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root .recent-list .row-trailing { flex: none; margin-inline-start: auto; }
+
+/* Active (All view): agents running now, below Recent. */
+:root .active-section { margin-block-start: 8px; padding-block-start: 6px; border-block-start: 1px solid var(--surface0); }
+:root .recent-more { margin-inline-start: 12px; }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=pending]::after { background: var(--pink); }

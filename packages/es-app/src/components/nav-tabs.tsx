@@ -31,6 +31,8 @@ export type NavTab = SidebarFilter
 const TAB_KEY = "es-app:nav-tab"
 const TABS = FILTERS
 const BAND_LIMIT = 8
+/** Recent rows shown above Active before "N more in Recent". */
+const RECENT_WITH_ACTIVE = 8
 const SURFACE_TYPES: [string, string][] = [["document", "Document"], ["dashboard", "Dashboard"], ["prototype", "Prototype"], ["interactive", "Interactive"], ["live", "Live"]]
 
 const storedTab = (): NavTab => {
@@ -238,7 +240,9 @@ export const NeedsYouBand = () => {
 export type Preview = { kind: string; title: string; agent?: string; owner?: string; host?: string; meta?: string; whatsNew?: string }
 
 /** An agent row already rendered by the sidebar, with the data the blended list needs. */
-export type RecentAgent = { key: string; title: string; updated?: number; host?: string; node: JSX.Element; preview: Preview }
+export type RecentAgent = { key: string; title: string; updated?: number; host?: string; node: JSX.Element; preview: Preview
+  /** Running now (busy, streaming, or waiting on a permission or question): listed under Active, not Recent. */
+  active?: boolean }
 
 type RecentNode = RecentItem & { node: JSX.Element; preview: Preview }
 
@@ -361,7 +365,7 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
         host: row.host, meta: `rev ${row.surface.revision}${row.surface.updated_at ? ` · ${clockTime(row.surface.updated_at)}` : ""}`,
         whatsNew: [...changeCall(row.surface), changeNoteLine(row.surface)].filter(Boolean).join(" · ") || undefined },
     }))
-    const agents: RecentNode[] = props.recentAgents.map(row => ({
+    const agents: RecentNode[] = props.recentAgents.filter(row => !row.active).map(row => ({
       kind: "agent" as const, key: row.key, title: row.title, updated: row.updated, opened: openedAt(row.key), node: row.node, preview: row.preview,
     }))
     // Blended and Updated split by day like the Agents view (the mode orders within a day); Opened is plain MRU.
@@ -372,6 +376,12 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
   })
   const groupOf = (row: RecentNode | undefined) => order() === "opened" || !row ? undefined : dateGroup(row.updated, recent().now)
 
+  // Active: running agents, newest turn first; their keys are out of Recent (recent() drops them).
+  const active = createMemo(() => props.recentAgents.filter(row => row.active).toSorted((a, b) => (b.updated ?? 0) - (a.updated ?? 0) || a.key.localeCompare(b.key)))
+  // With agents running, a long Recent shows its first rows and a "more" link so Active stays in view.
+  const [recentExpanded, setRecentExpanded] = createSignal(false)
+  const visibleRecent = () => active().length && !recentExpanded() ? shown().slice(0, RECENT_WITH_ACTIVE) : shown()
+  const hiddenRecent = () => shown().length - visibleRecent().length
   const byKey = createMemo(() => new Map(recent().all.map(row => [row.key, row])))
   // Stable order: a refetch never reorders what is shown within a day; new rows appear in place.
   const [shownKeys, setShownKeys] = createSignal<string[]>([])
@@ -392,7 +402,9 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
     const rows = untrack(byKey)
     setShownKeys(arrange(current, keys, key => untrack(() => groupOf(rows.get(key))) ?? ""))
   })
-  const shown = () => (frozen() ?? shownKeys()).flatMap(key => { const row = byKey().get(key); return row ? [row] : [] })
+  // A frozen list (focus inside) holds its order; rows that arrive meanwhile (a new agent, one that just left Active)
+  // follow it at the end rather than vanishing, and the pill offers their sorted place.
+  const shown = () => { const held = frozen(); return (held ? [...held, ...newcomers(held, shownKeys())] : shownKeys()).flatMap(key => { const row = byKey().get(key); return row ? [row] : [] }) }
   const applyNew = () => { setShownKeys(recent().all.map(row => row.key)); setFrozen(null) }
   // Only a frozen list (focus inside it) hides new rows; the pill counts them and shows them.
   const pending = () => { const held = frozen(); return held ? newcomers(held, shownKeys()) : [] }
@@ -505,7 +517,7 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
             </Show>
             {props.statuses}
             <div class="recent-list">
-              <For each={shown()}>{(row, index) => {
+              <For each={visibleRecent()}>{(row, index) => {
                 const group = () => groupOf(row)
                 // A heading marks each change of day; a list that is all undated needs none.
                 const heading = () => group() !== undefined && (index() === 0 ? group() !== "undated" : group() !== groupOf(shown()[index() - 1]))
@@ -515,7 +527,20 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
                 </>
               }}</For>
             </div>
-            <Show when={!shown().length}><div class="dim nav-empty">{queue.surfaces.error() ?? "Nothing recent yet."}</div></Show>
+            <Show when={hiddenRecent()}>
+              <button type="button" class="link-button nav-more recent-more" aria-expanded="false" onClick={() => setRecentExpanded(true)}>{hiddenRecent()} more in Recent</button>
+            </Show>
+            <Show when={!shown().length && !active().length}><div class="dim nav-empty">{queue.surfaces.error() ?? "Nothing recent yet."}</div></Show>
+            {/* Agents running now: a turn in progress or waiting on a permission or question. Same rows as Recent (the
+              * avatar's spinner is the live cue, the time column is how long the turn has run); hidden when none. */}
+            <Show when={active().length}>
+              <section class="active-section" aria-label={`Active, ${active().length}`}>
+                <div class="nav-heading">Active <span class="nav-heading-count" dir="ltr">{active().length}</span></div>
+                <div class="recent-list active-list">
+                  <For each={active()}>{row => row.node}</For>
+                </div>
+              </section>
+            </Show>
           </>
         }>{props.agents}</Show>
       </Show>
