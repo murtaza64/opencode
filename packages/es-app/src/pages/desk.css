@@ -229,3 +229,13 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .home-option-chips > [data-chosen] { color: var(--peach); border-color: var(--peach); }
 
 
+
+/* Memory archive: docs and session summaries under the notes. */
+.desk-archive h4 { margin: 8px 0 2px; font-size: 11px; color: var(--subtext0); font-weight: 600; }
+.desk-archive-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.desk-archive-list button[aria-current] { font-weight: 600; }
+.desk-archive-doc { margin-block: 8px; padding: 8px; border: 1px solid var(--surface1); border-radius: 6px; }
+.desk-archive-doc textarea { inline-size: 100%; box-sizing: border-box; font: 12px/1.5 var(--font-mono); }
+.desk-archive-text { margin: 4px 0; max-block-size: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--font-mono); color: var(--text); }
+.desk-archive .search-input { inline-size: 100%; margin-block: 6px; }
+.desk-archive-slug { font: inherit; background: none; padding: 0; unicode-bidi: isolate; }

@@ -189,7 +189,7 @@ test("a later note carries only the parts that changed and names the rest as unc
   expect(update.text).toContain("only what changed since the last note")
   expect(update.text).toContain("rev 3")
   expect(update.text).not.toContain("sources:")
-  expect(update.text).toContain("unchanged: scope, selected item, open surface, cases, sources, briefs, memory")
+  expect(update.text).toContain("unchanged: scope, selected item, open surface, cases, sources, briefs")
 })
 
 test("a part that became empty is said to be empty, not silently dropped", () => {
@@ -256,6 +256,24 @@ test("a scope change resends the memory notes for the new scope", () => {
   const beta = contextNote(deskContext({ now: 0, scope: "beta", sources: [], items: [], briefs: [], memory }).sections, told, 2_000)!
   expect(beta.text).toContain("beta note")
   expect(beta.text).not.toContain("alpha note")
+})
+
+test("memory is sent at session seed only: a mid-session write, an update or a full refresh does not resend it", () => {
+  const doc = (text: string) => ({ version: 1, revision: 1, entries: [{ id: "a", text, kind: "fact", scope: "global", confidence: "stated", actor: "human", source: "chat", updated: 1 }] }) as unknown as MemoryDocument
+  const view = (text: string, revision: number) => deskContext({ now: 0, sources: [], items: items(revision), briefs: [], memory: doc(text) }).sections
+  const seed = contextNote(view("first note", 1), undefined, 1_000)!
+  expect(seed.text).toContain("first note")
+  // A memory write mid-session: the next update carries the queue change, not the new memory.
+  const update = contextNote(view("edited note", 2), seed.state, 2_000)!
+  expect(update.text).toContain("rev 2")
+  expect(update.text).not.toContain("edited note")
+  // A full refresh (six hours later) and a note on a Core input do not resend it either.
+  const refresh = contextNote(view("edited note", 3), seed.state, 1_000 + 6 * 3_600_000 + 1)!
+  expect(refresh.text).toContain("Read-only snapshot")
+  expect(refresh.text).not.toContain("edited note")
+  expect(contextNote(view("edited note", 3), seed.state, 3_000, { input: true })!.text).not.toContain("edited note")
+  // A new desk session (nothing told yet) seeds with the current memory.
+  expect(contextNote(view("edited note", 3), undefined, 4_000)!.text).toContain("edited note")
 })
 
 test("clipping memory keeps its rules: notes are never permission and never hold credentials", () => {

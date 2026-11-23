@@ -272,7 +272,10 @@ export const canonicalLines = (item: DeskItem) => {
 /** One part of the desk's context note. `key` is everything the part states except clock-derived ages, so an
  * unchanged part stays out of the next note. `none` says the part is now empty. `head` lines go first and are never
  * split: when they do not fit, the whole part is left out (and not recorded as told). */
-type NoteSection = { name: string; key: string; lines: string[]; none?: string; head?: string[] }
+type NoteSection = { name: string; key: string; lines: string[]; none?: string; head?: string[]
+  /** Sent once per desk session and `key` (its seed), never again for that key: content changes apply at the next
+   * session (Porter memory, dotfiles#295: the hot block stays frozen per session so the provider cache holds). */
+  seed?: true }
 
 export const deskContext = (input: {
   now: number
@@ -305,7 +308,8 @@ export const deskContext = (input: {
     { name: "briefs", key: hash(ready.map(brief => brief.meta.requestID)), none: "derived briefs: none now.",
       lines: ready.slice(-3).map(brief => `derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`) },
     (() => { const memory = memoryParts(input.memory, input.scope)
-      return { name: "memory", key: hash([memory.title, memory.entries]), head: [memory.title, ...MEMORY_RULES], lines: memory.entries } })(),
+      // Keyed by scope only: a memory write mid-session changes nothing sent; a new scope seeds its own notes.
+      return { name: "memory", key: hash(["memory", input.scope ?? ""]), head: [memory.title, ...MEMORY_RULES], lines: memory.entries, seed: true as const } })(),
   ]
   return { key: hash(sections.map(section => section.key)), text: contextNote(sections, undefined, input.now, { input: true })!.text, sections }
 }
@@ -324,6 +328,9 @@ const FULL_EVERY = { ms: 6 * 3_600_000, notes: 12 }
 export const contextNote = (sections: NoteSection[], previous: NoteState | undefined, now: number,
   options: { partial?: string; input?: boolean; seq?: number } = {}) => {
   const complete = !!options.input || !options.partial && (!previous?.full || now - previous.full > FULL_EVERY.ms || previous.notes >= FULL_EVERY.notes)
+  // A seed part already told to this session under its key is never repeated, by updates or full refreshes.
+  const told = (section: NoteSection) => !!section.seed && previous?.sections[section.name] === section.key
+  sections = sections.filter(section => !told(section))
   const changed = complete ? sections : sections.filter(section => previous?.sections[section.name] !== section.key)
   if (!changed.length) return undefined
   const order = options.seq ? [`note ${options.seq}; for each part, the highest-numbered note that states it wins.`] : []

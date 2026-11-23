@@ -867,6 +867,12 @@ test("re-checking an answer's delivery and regenerating a brief reach the dashbo
 test("Ori key usage is read-only on the local desktop listener", async () => {
   const { get } = await setup()
   expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(true)
+  for (const route of ["/es/api/frontdesk/archive", "/es/api/frontdesk/archive/search", "/es/api/frontdesk/archive/doc/release-flow", "/es/api/frontdesk/archive/doc/sessions/2026-11-23-ses_e0649e688ffeM3YMm3i13AVsxL"])
+    expect(apiAllowed("GET", route)).toBe(true)
+  for (const method of ["PUT", "DELETE"]) expect(apiAllowed(method, "/es/api/frontdesk/archive/doc/sessions/2026-11-23-ses_e0649e688ffeM3YMm3i13AVsxL")).toBe(true)
+  for (const route of ["/es/api/frontdesk/archive/doc/../memory", "/es/api/frontdesk/archive/doc/a/b", "/es/api/frontdesk/archive/doc/Big", "/es/api/frontdesk/archive/doc/sessions/notes"])
+    expect(apiAllowed("PUT", route)).toBe(false)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/archive")).toBe(false)
   expect(apiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(false)
   expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/raw")).toBe(false)
   expect(apiAllowed("GET", "/es/api/usage/openrouter")).toBe(true)

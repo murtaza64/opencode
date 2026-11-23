@@ -241,6 +241,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+$/,
       /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
       /^\/es\/api\/usage\/openrouter$/,
+      // Porter memory archive (dotfiles#295): doc list, search, one doc.
+      /^\/es\/api\/frontdesk\/archive(?:\/search|\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64}))?$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
       // Per-session wake state (es.mail.wake/v1): next wake time and reason from the dashboard's schedulers; read-only.
       /^\/es\/api\/mail\/wake$/,
@@ -281,8 +283,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/frontdesk\/briefs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/regenerate$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/, new RegExp(`^/es/api/pins/${PIN_REF}/order$`)],
-    PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory|frontdesk\/pointer)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
-    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
+    PUT: [/^\/es\/api\/frontdesk\/archive\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64})$/, /^\/es\/api\/(subscriptions|frontdesk\/memory|frontdesk\/pointer)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
+    DELETE: [/^\/es\/api\/frontdesk\/archive\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64})$/, /^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
 }

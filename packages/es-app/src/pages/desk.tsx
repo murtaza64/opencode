@@ -26,6 +26,7 @@ import { oc } from "../api"
 import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
+import { ArchivePanel } from "../components/desk-archive"
 import { parseWorkKey, workQueue, workSurfaces, type WorkEntry } from "../work-queue"
 import { host, readHost } from "../host"
 import { localWorkKey, remoteGap } from "../surface-ref"
@@ -476,5 +477,6 @@ const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
         </li>}</For>
       </ol>
     </details>
+    <ArchivePanel />
   </section>
 }
