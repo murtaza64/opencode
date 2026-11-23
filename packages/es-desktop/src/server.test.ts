@@ -277,7 +277,7 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
     "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/x",
     "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0/raw",
     "/oc/session/ses_a/message/msg_b/part/../attachment/0",
-    "/oc/session/ses_a/message/msg_b/part/prt_c",
+    // The bare part (Core part.get) is allowed for compact-page hydration; only the part list is not.
     "/oc/session/ses_a/message/msg_b/part",
   ]) expect(apiAllowed("GET", pathname)).toBe(false)
 })
@@ -866,6 +866,9 @@ test("re-checking an answer's delivery and regenerating a brief reach the dashbo
 
 test("Ori key usage is read-only on the local desktop listener", async () => {
   const { get } = await setup()
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(true)
+  expect(apiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(false)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/raw")).toBe(false)
   expect(apiAllowed("GET", "/es/api/usage/openrouter")).toBe(true)
   expect(apiAllowed("POST", "/es/api/usage/openrouter")).toBe(false)
   expect(apiAllowed("GET", "/es/api/usage/openrouter/other")).toBe(false)

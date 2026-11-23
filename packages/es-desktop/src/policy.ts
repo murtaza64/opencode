@@ -237,6 +237,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
       // A user/assistant file part's bytes (a pasted screenshot), referenced by compact pages instead of inlined.
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file$/,
+      // One full part (Core part.get), read when a tool row a compact page shortened is opened. Read-only.
+      /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+$/,
       /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
       /^\/es\/api\/usage\/openrouter$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,

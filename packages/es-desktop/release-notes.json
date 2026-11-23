@@ -1,7 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-21.1",
+  "release": "2026-11-23.1",
   "items": [
+    {
+      "title": "Faster chats",
+      "detail": "Chats load a lighter page: images and long tool output load when shown or opened, not with every page. Style rules and background reads that slowed busy sessions are gone."
+    },
     {
       "title": "Mail list",
       "detail": "Mail an agent already read, in a running turn or with es mail check, no longer counts as unread or shows a struck bolt; the unread count matches es mail. When there is nothing to re-offer, Wake now is hidden. Kind labels share one column, so titles line up."
@@ -13,10 +17,6 @@
     {
       "title": "Wake state on mail",
       "detail": "Unread mail shows a bolt instead of words: struck through and grey when no wake is scheduled, plain with a countdown when one is. Hover it for the full text."
-    },
-    {
-      "title": "Spend in the title bar",
-      "detail": "The title bar shows Today, WTD and MTD spend in UTC across every Work host: OpenRouter billing plus gateway and other providers. If a host is off, ≥ marks the amount as partial and the tooltip names the host."
     }
   ],
   "limits": [
