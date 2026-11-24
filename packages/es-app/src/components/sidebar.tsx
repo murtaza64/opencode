@@ -26,6 +26,7 @@ import { host } from "../host"
 import { personas } from "../desk-identity"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
+import { TestInstanceBadge } from "./native-header"
 import { waveStart } from "../wave"
 import { UnifiedSidebar, type RecentAgent } from "./nav-tabs"
 import { clockTime } from "../local-time"
@@ -667,7 +668,7 @@ export default function Sidebar() {
       }
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
-        <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}<TodayCost /></div></Show>
+        <Show when={!nativeHeader}><div class="sidebar-top"><TestInstanceBadge />{projectControls()}<TodayCost /></div></Show>
         {/* Unified nav (dotfiles#240): primary entries, then Pinned, then one list that opens with what
           * needs you and continues with Recent (agents, Surfaces and closed decisions blended). */}
         <NavEntries />

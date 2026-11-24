@@ -9,7 +9,9 @@ export type Profile = "work" | "personal"
 export type HostKind = "laptop" | "mini" | "pc"
 /** `readOnly`: rows read through this listener only; no session is created there from this page (a pinned-SSH Personal peer). */
 export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind; readOnly?: true }
-export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[]; profile?: Profile; kind?: HostKind }
+export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[]; profile?: Profile; kind?: HostKind
+  /** Desktop on a disposable profile (a test or probe instance): its label, e.g. "TEST · editspace-header-x". */
+  testInstance?: string }
 
 const profileOf = (value: unknown) => (value === "work" || value === "personal" ? { profile: value as Profile } : {})
 const kindOf = (value: unknown) => (value === "laptop" || value === "mini" || value === "pc" ? { kind: value as HostKind } : {})
@@ -51,7 +53,8 @@ export const hostInfo = (value: unknown): HostInfo => {
       )
     : []
   if (typeof record.id !== "string" || typeof record.label !== "string") return { id: "local", label: "Local", remote: false, hosts, work }
-  return { id: record.id, label: record.label, remote: record.remote === true, hosts, work, ...profileOf(record.profile), ...kindOf(record.kind) }
+  return { id: record.id, label: record.label, remote: record.remote === true, hosts, work, ...profileOf(record.profile), ...kindOf(record.kind),
+    ...(typeof record.testInstance === "string" && record.testInstance.length <= 120 ? { testInstance: record.testInstance } : {}) }
 }
 
 /** The other hosts this page reads as feeds: never itself, and only hosts of this page's profile (a Work page never

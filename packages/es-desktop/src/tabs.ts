@@ -5,6 +5,7 @@
  * covered. Each view has its own session partition and origin, so drafts, cookies and requests
  * never cross hosts, and a view keeps its page while another host is shown. The strip has no
  * scripts or privileges; selecting a tab is a navigation the main process intercepts. */
+import { testInstance } from "./test-instance"
 import { Menu, session, WebContentsView, type BaseWindow, type Session, type WebContents } from "electron"
 import type { Unavailable } from "./badges"
 
@@ -120,8 +121,8 @@ export const createTabs = (
   // The strip's width over an app host: the window controls plus each tab. Labels are short host
   // names in the system font; the estimate leaves slack rather than clipping.
   const stripWidth = () => narrow()
-    ? CONTROLS_INSET + 8 + 20 + Math.min(150, Math.ceil(current().label.length * 7.4)) + 16 + (summary() ? 24 : 0)
-    : CONTROLS_INSET + 8 + strip().reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
+    ? CONTROLS_INSET + 8 + (testInstance() ? 20 + Math.min(220, Math.ceil(testInstance()!.label.length * 7)) : 0) + 20 + Math.min(150, Math.ceil(current().label.length * 7.4)) + 16 + (summary() ? 24 : 0)
+    : CONTROLS_INSET + 8 + (testInstance() ? 20 + Math.min(220, Math.ceil(testInstance()!.label.length * 7)) : 0) + strip().reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
   // The app's header starts after the strip, in the same row, keeping its own drag area.
   const inset = async (tab: HostTab, contents: WebContents) => {
     if (tab.kind !== "app" || contents.isLoading()) return
@@ -274,6 +275,11 @@ export const createTabs = (
   }
 }
 
+const testMark = () => {
+  const test = testInstance()
+  return test ? `<span class="test-instance" role="status" title="${escape(`Test instance on a separate profile: ${test.profile}. Not your normal Editspace; its pins, drafts and desk history are its own.`)}">${escape(test.label)}</span>` : ""
+}
+
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
 
 const style = (full: boolean) => `<style>
@@ -286,17 +292,18 @@ a:focus-visible{outline:2px solid #b4befe;outline-offset:-2px}
 a[aria-current=page]{color:#cdd6f4;background:#26262b}
 b{min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#fab387;color:#040405;font-size:10px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
 b.unknown{background:transparent;border:1px dashed #6c7086;min-width:12px;width:12px;height:12px;padding:0}
+.test-instance{margin-right:6px;padding:2px 7px;border-radius:5px;background:#f38ba8;color:#040405;font-size:11px;letter-spacing:.04em;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 </style>`
 
 const collapsedHTML = (tab: HostTab, full: boolean, summary: string, unavailable: string) => {
   const unknown = summary === " "
   const label = unknown ? `Other hosts: ${unavailable}` : summary ? `Other hosts: ${summary} need you` : ""
   const mark = summary ? `<b${unknown ? ' class="unknown"' : ""} aria-label="${label}">${unknown ? "" : summary}</b>` : ""
-  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts"><a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${testMark()}<a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
 }
 
 const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined, unavailable: (id: string) => string) =>
-  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${tabs
+  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${testMark()}${tabs
     .map((tab) => {
       const text = badge(tab.id)
       const value = shown(tab.id)

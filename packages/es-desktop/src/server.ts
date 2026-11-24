@@ -1,3 +1,4 @@
+import { testInstance } from "./test-instance"
 import { createServer, request as httpRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { createReadStream } from "node:fs"
@@ -291,7 +292,9 @@ export const serve = async (options: {
     }
     if (url.pathname === "/__es/host") {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
-      return finish(200, JSON.stringify(options.hostInfo?.() ?? localHost), "application/json")
+      // A test instance (disposable profile) says so, so the app can label itself in every window.
+      const test = testInstance()
+      return finish(200, JSON.stringify({ ...(options.hostInfo?.() ?? localHost), ...(test ? { testInstance: test.label } : {}) }), "application/json")
     }
     if (url.pathname.startsWith("/__es/surface/")) {
       return surfaces.address(req, res)

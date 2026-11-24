@@ -2300,3 +2300,6 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .mail-unread-wake[data-cue=off] .mail-wake-cue { color: var(--overlay0); }
 .mail-unread-wake[data-cue=off] .mail-wake-cue::after { content: ""; position: absolute; inset-inline-start: -1px; inset-block-start: 50%; inline-size: calc(100% + 2px); block-size: 1.5px; background: currentColor; border-radius: 1px; transform: rotate(-45deg); }
 .mail-wake-short { font-variant-numeric: tabular-nums; }
+
+/* Desktop test or probe instance: unmistakable, in every window. */
+.test-instance-badge { flex: none; display: inline-flex; align-items: center; margin-inline-end: 8px; padding: 1px 8px; border-radius: 5px; background: var(--red); color: var(--crust); font: 700 11px/18px var(--font-sans); letter-spacing: .04em; white-space: nowrap; max-inline-size: 240px; overflow: hidden; text-overflow: ellipsis; -webkit-app-region: no-drag; }

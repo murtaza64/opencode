@@ -1,3 +1,4 @@
+import { host } from "../host"
 import { createSignal, onCleanup, onMount, Show, type ParentProps } from "solid-js"
 import { Portal } from "solid-js/web"
 import "./native-header.css"
@@ -58,6 +59,7 @@ export const NativeHeader = (props: ParentProps) => {
     <Portal mount={host}>
       <div class="native-header" role="banner" aria-label="Application header" style={edges() ? { "--pane-start": `${edges()!.pane}px`, "--header-start": `${edges()!.header}px` } : undefined}>
         <div class="native-header-safe" ref={safe}>
+          <TestInstanceBadge />
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
           <TodayCost />
@@ -132,3 +134,10 @@ const GlassesToggle = () => {
     </button>
   }}</Show>
 }
+
+/** A Desktop test or probe instance (disposable profile) says so in its own header: it shows none of the normal
+ * profile's pins, drafts or desk history, so it must never pass for the normal Editspace. */
+export const TestInstanceBadge = () => <Show when={host()?.testInstance}>{(label) =>
+  <span class="test-instance-badge" role="status" title="Test instance on a separate profile: not your normal Editspace. Its pins, drafts and desk history are its own.">
+    <bdi dir="ltr">{label()}</bdi>
+  </span>}</Show>
