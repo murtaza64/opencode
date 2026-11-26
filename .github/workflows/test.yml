@@ -79,6 +79,18 @@ jobs:
         working-directory: packages/opencode
         run: bun run test:httpapi
 
+      - name: Check isolated Core dispatch and SQLite contention
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        timeout-minutes: 12
+        working-directory: packages/opencode
+        run: |
+          command -v lsof
+          bun script/build.ts --single --skip-install --skip-embed-web-ui
+          export HARNESS_BINARY="$PWD/dist/opencode-linux-x64/bin/opencode"
+          cd ../es-app
+          bun test/harness-perf.real.mjs
+          HARNESS_SQLITE_WORKER=1 HARNESS_SQLITE_PROBE=1 HARNESS_SQLITE_ASSERT=1 bun test/harness-perf.real.mjs
+
   e2e:
     name: e2e (${{ matrix.settings.name }})
     strategy:

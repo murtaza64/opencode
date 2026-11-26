@@ -3,6 +3,30 @@ import { canReusePendingBlock } from "./markdown-projection"
 import { project, stream } from "./markdown-stream"
 
 describe("markdown stream", () => {
+  test("matches full projection at each mixed Markdown append and after replacement", () => {
+    const chunks = ["A plain line", " with café and 42", "\n", "===", "\n\n- first", "\n- **second**", "\n\n[ref][id]", "\n\n[id]: /guide"]
+    let current: ReturnType<typeof project> | undefined
+    for (const chunk of chunks) {
+      const text: string = (current?.text ?? "") + chunk
+      current = project(current, text, true)
+      expect(current.blocks).toEqual(stream(text, true))
+    }
+    for (const text of ["Replaced plain text", "Replaced plain", "| a | b |\n|:-|:-|\n| 1 | 2 |", "https://example.com"]) {
+      current = project(current, text, true)
+      expect(current.blocks).toEqual(stream(text, true))
+    }
+  })
+  test("keeps plain line deltas incremental and falls back when Markdown arrives", () => {
+    const first = project(undefined, "A streaming line", true)
+    const next = project(first, `${first.text} with more words`, true)
+    expect(next.plainLine).toBe(true)
+    expect(next.blocks).toEqual(stream(next.text, true))
+    for (const suffix of ["\n---", " [docs](https://example.com)", "\n\n[docs]: /guide", "\n\n```ts\nconst x = 1"]) {
+      const changed = project(next, next.text + suffix, true)
+      expect(changed.plainLine).toBeUndefined()
+      expect(changed.blocks).toEqual(stream(changed.text, true))
+    }
+  })
   test("heals incomplete emphasis while streaming", () => {
     expect(stream("hello **world", true)).toEqual([{ raw: "hello **world", src: "hello **world**", mode: "live" }])
     expect(stream("say `code", true)).toEqual([{ raw: "say `code", src: "say `code`", mode: "live" }])

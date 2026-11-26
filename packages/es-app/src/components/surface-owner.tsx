@@ -7,6 +7,7 @@ import type { Surface } from "../surfaces"
 import { surfaceOwner } from "../surface-owner"
 import { personas, DESK } from "../desk-identity"
 import { ocAt } from "../api"
+import type { Session } from "@opencode-ai/sdk/v2"
 import { hostPrefix } from "../host-items"
 
 const chipStore = (host: string | undefined, session: string) => host ? `es-app:context-refs:${host}:${session}` : `es-app:context-refs:${session}`
@@ -19,7 +20,10 @@ const addChip = (key: string, ref: ContextRef) => {
 /** One owner resolution for the header and the on-Surface composer. Never substitute another session for a missing owner. */
 export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; label: string }) => {
   const navigate = useNavigate()
-  const [owner] = createResource(surface, value => surfaceOwner(value, host ? hostPrefix(host.id) : ""))
+  // Keyed by the owning lane, not the Surface object: a Surfaces poll returns a fresh object every 15 s, and a
+  // refetch on each one handed the chat a new owner, remounting its transcript and aborting its read every poll.
+  const [owner] = createResource(() => { const value = surface(); return `${value.editspace}\u0000${value.lane ?? ""}` },
+    () => surfaceOwner(surface(), host ? hostPrefix(host.id) : ""))
   const ref = () => surfaceRef(surface(), host?.id ?? window.location.host)
   // A persona's name when the lane has one; else the owner as written when it is a name, or the humanised last lane
   // segment ("opencode/ux-feel" -> "Ux feel"), never a raw editspace/lane path.
@@ -37,11 +41,12 @@ export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; lab
     addChip(chipStore(host?.id, value.session), ref())
     navigate(href()!)
   }
-  const send = async (text: string, messageID: string) => {
+  /** `known`: the owner session's record when the caller already holds it, so a send is one request. */
+  const send = async (text: string, messageID: string, known?: Session) => {
     const value = owner()
     if (value?.state !== "ok") return false
     const core = ocAt(host ? `${hostPrefix(host.id)}/oc` : "/oc")
-    const session = await core.session(value.session, value.directory)
+    const session = known?.id === value.session ? known : await core.session(value.session, value.directory)
     const url = new URL(host ? `/?item=${encodeURIComponent(`${host.id}~surface:${surface().id}`)}` : `/?surface=${encodeURIComponent(surface().id)}`, window.location.origin).href
     // Sent from the reader's Message owner: the transcript says "While looking at …", not "About …".
     await core.prompt(session, value.directory, text, { messageID, context: [contextPart(ref(), url, Date.now(), "reader")] })

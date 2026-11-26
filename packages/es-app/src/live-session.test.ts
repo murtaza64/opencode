@@ -101,7 +101,7 @@ test("model connection failure stops thinking without waiting for an idle event"
   expect(live.connectionError()).toBe("")
 })
 
-test("todos load with the snapshot and follow todo.updated for this session only", async () => {
+test("todos load independently and follow todo.updated for this session only", async () => {
   todos = [{ content: "first", status: "in_progress", priority: "high" }]
   const live = start()
   await live.load()
@@ -111,6 +111,29 @@ test("todos load with the snapshot and follow todo.updated for this session only
   SessionEvents.current.send("todo.updated", { sessionID: "ses_current", todos: [{ content: "first", status: "completed", priority: "high" }] })
   expect(live.data.todo[0]?.status).toBe("completed")
 })
+
+test("a slow todo read cannot delay history or replace a newer todo event", async () => {
+  snapshot = [{ info: user(), parts: [] }]
+  const held = Promise.withResolvers<Response>()
+  const started = Promise.withResolvers<void>()
+  fetchSpy.mockImplementation(async (input) => {
+    if (!String(input).includes("/todo?")) return response(input)
+    started.resolve()
+    return held.promise
+  })
+  const live = start()
+  const ready = live.load()
+  await started.promise
+  try {
+    await ready
+    expect(live.data.message.ses_current).toHaveLength(1)
+    const updated = [{ content: "newer", status: "completed", priority: "high" }]
+    SessionEvents.current.send("todo.updated", { sessionID: "ses_current", todos: updated })
+    held.resolve(Response.json([{ content: "stale", status: "pending", priority: "low" }]))
+    await Bun.sleep(0)
+    expect(live.data.todo).toEqual(updated)
+  } finally { held.resolve(Response.json([])) }
+}, 2500)
 
 test("a failed todo read keeps the transcript snapshot and the last list", async () => {
   todos = [{ content: "kept", status: "pending", priority: "low" }]

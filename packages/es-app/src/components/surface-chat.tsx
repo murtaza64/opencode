@@ -4,7 +4,7 @@
  * with the author's prompt path (useSurfaceOwner). Delivery ticks come from the session itself: Sent (accepted, not
  * yet in the session), Seen (the message is in the agent's session), Replied (an assistant message answers it). */
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
-import type { AssistantMessage, Message } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Message, Session } from "@opencode-ai/sdk/v2"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { createLiveSession } from "../live-session"
 import { hostPrefix } from "../host-items"
@@ -58,8 +58,10 @@ export const SurfaceChat = (props: {
 }) => {
   const [sending, setSending] = createSignal(false)
   const [error, setError] = createSignal("")
-  // Messages this reader sent and the session has not shown yet: "Sent".
-  const [pending, setPending] = createSignal<{ id: string; text: string }[]>([])
+  // Messages this reader sent and the session has not shown yet: "Sending…" until Core accepts, then "Sent".
+  const [pending, setPending] = createSignal<Pending[]>([])
+  // The owner session's record as the thread loaded it, so a send needs no record read of its own.
+  const [record, setRecord] = createSignal<Session>()
   let input: HTMLTextAreaElement | undefined
   const owner = () => { const value = props.author.owner(); return value?.state === "ok" ? value : undefined }
   const send = async () => {
@@ -67,13 +69,19 @@ export const SurfaceChat = (props: {
     if (!text || sending() || !owner()) return
     setSending(true)
     setError("")
-    // A lost ACK may already have admitted this ID: keep the draft and never resend automatically.
+    // Shown at once; the draft comes back if Core does not accept it. A lost ACK may already have admitted this ID:
+    // never resend automatically.
     const id = `msg_${crypto.randomUUID().replaceAll("-", "")}`
+    props.setDraft("")
+    setPending([...pending(), { id, text, state: "sending" }])
+    const restore = () => { setPending(pending().filter((item) => item.id !== id)); if (!props.draft().trim()) props.setDraft(text) }
     try {
-      if (await props.author.send(text, id)) { props.setDraft(""); setPending([...pending(), { id, text }]) }
-    } catch { setError("Send unconfirmed. Check the full chat before trying again.") }
+      if (await props.author.send(text, id, record())) setPending(pending().map((item) => item.id === id ? { ...item, state: "sent" } : item))
+      else restore()
+    } catch { restore(); setError("Send unconfirmed. Check the full chat before trying again.") }
     setSending(false)
   }
+  const target = createMemo(() => { const value = owner(); return value ? `${value.session}\u0000${value.directory}` : undefined })
   onMount(() => queueMicrotask(() => input?.focus()))
   return <section class="sc-chat" classList={{ "sc-chat-min": props.minimised }} role="dialog" aria-label={`Chat with ${props.author.name()}`} ref={props.ref}
     onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onMinimise() } }}>
@@ -84,8 +92,9 @@ export const SurfaceChat = (props: {
       <button type="button" class="sc-chat-icon" aria-label="Minimise chat" title="Minimise (Esc)" onClick={props.onMinimise}>–</button>
       <button type="button" class="sc-chat-icon" aria-label="Close chat" title="Close" onClick={props.onClose}>×</button>
     </header>
-    <Show when={owner()} keyed fallback={<p class="sc-chat-empty" role="status">{props.author.owner.loading ? "Finding the author's chat…" : (props.author.owner() as { why?: string } | undefined)?.why ?? "The author's chat is not reachable now."}</p>}>{(value) =>
-      <Thread session={value.session} directory={value.directory} surface={props.surface} host={props.host} pending={pending()} onPending={setPending} minimised={props.minimised} onUnread={props.onUnread} onFull={() => props.author.open()} />}</Show>
+    {/* Keyed by the session, not the owner object: a re-read owner with the same session keeps the thread and its read. */}
+    <Show when={target()} keyed fallback={<p class="sc-chat-empty" role="status">{props.author.owner.loading ? "Finding the author's chat…" : (props.author.owner() as { why?: string } | undefined)?.why ?? "The author's chat is not reachable now."}</p>}>{(key) =>
+      <Thread session={key.split("\u0000")[0]!} directory={key.split("\u0000")[1]!} surface={props.surface} host={props.host} pending={pending()} onPending={setPending} onRecord={setRecord} minimised={props.minimised} onUnread={props.onUnread} onFull={() => props.author.open()} />}</Show>
     <form class="sc-chat-compose" onSubmit={(event) => { event.preventDefault(); void send() }}>
       <span class="sc-chat-chip" title="Sent with this Surface attached as context">about <bdi dir="auto">{props.surface.title}</bdi> r{props.revision}</span>
       <textarea ref={input} dir="auto" rows={2} placeholder={props.recording ? "Listening…" : `Message ${props.author.name()}…`} aria-label={`Message ${props.author.name()}`} value={props.draft()}
@@ -93,14 +102,18 @@ export const SurfaceChat = (props: {
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
       <div class="sc-chat-row">
         <Show when={error()}><span class="sc-note" role="alert">{error()}</span></Show>
-        <button class="sc-chat-send" type="submit" disabled={!props.draft().trim() || sending() || !owner()}>{sending() ? "Sending…" : "Send"}</button>
+        <button class="sc-chat-send" type="submit" disabled={!props.draft().trim() || sending() || !owner()}>Send</button>
       </div>
     </form>
   </section>
 }
 
-const Thread = (props: { session: string; directory: string; surface: Surface; host?: { id: string; label: string }; pending: { id: string; text: string }[]; onPending: (items: { id: string; text: string }[]) => void; minimised: boolean; onUnread: (count: number) => void; onFull: () => void }) => {
+type Pending = { id: string; text: string; state: "sending" | "sent" }
+
+const Thread = (props: { session: string; directory: string; surface: Surface; host?: { id: string; label: string }; pending: Pending[]; onPending: (items: Pending[]) => void; onRecord: (session: Session | undefined) => void; minimised: boolean; onUnread: (count: number) => void; onFull: () => void }) => {
   const live = createLiveSession(props.session, props.directory, undefined, { id: props.host?.id, base: props.host ? `${hostPrefix(props.host.id)}/oc` : "/oc" })
+  createEffect(() => props.onRecord(live.data.session.find((item) => item.id === props.session)))
+  onCleanup(() => props.onRecord(undefined))
   onMount(() => { void live.load().catch(() => {}) })
   const all = () => (live.data.message[props.session] ?? []) as Message[]
   // This Surface's conversation in the author's session: the reader's messages about it and the agent's replies,
@@ -193,7 +206,8 @@ const Thread = (props: { session: string; directory: string; surface: Surface; h
       }}</For>
     </DataProvider>
     <For each={props.pending}>{(item) => <div class="sc-chat-msg sc-chat-pending" data-role="user"><p dir="auto">{item.text}</p>
-      <span class="sc-chat-meta"><span class="sc-chat-tick" data-state="sent" title="Accepted; not in the agent's session yet">✓ Sent</span></span></div>}</For>
+      <span class="sc-chat-meta"><Show when={item.state === "sent"} fallback={<span class="sc-chat-tick" data-state="sending" title="Not accepted by the agent's session yet">Sending…</span>}>
+        <span class="sc-chat-tick" data-state="sent" title="Accepted; not in the agent's session yet">✓ Sent</span></Show></span></div>}</For>
     <Show when={working()}><p class="sc-chat-working" role="status"><span aria-hidden="true">•••</span> working</p></Show>
     </div>
   </div>
