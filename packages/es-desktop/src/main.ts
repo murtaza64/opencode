@@ -1,17 +1,22 @@
-import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, screen, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, powerMonitor, safeStorage, screen, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { localHost, type WorkHost } from "../../es-app/remote-host"
+import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
+import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
-import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { createTranscriber, createVoice, voiceTools } from "./voice"
+import { GLASSES_PICK_MS, pickDecision } from "./glasses-policy"
+import { watchPageAnswer } from "./page-answer"
+import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
 import { blurPlan, createAppearance } from "./appearance"
 import { blurOffMain } from "./blur-worker"
+import { createBridge, encryptedCookie, keychainAccess } from "./bridge"
+import { createSshPeer } from "./ssh-peer"
 import { createReleaseNotes } from "./release-notes"
 import { keepSessionCookies } from "./page-cookies"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
@@ -84,29 +89,48 @@ const start = async () => {
         ? () => shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         : undefined,
   })
+  const glassesTranscriber = createTranscriber({
+    resolve: () => voiceTools({ home: app.getPath("home"), env: process.env, config: path.join(app.getPath("userData"), "voice.json"), fallback: process.platform === "darwin" ? ["/usr/bin/afconvert"] : [] }),
+    temp: app.getPath("temp"),
+    glasses: true,
+    maxSeconds: 30,
+  })
+  // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
+  // blur at a work size, shown at display resolution (blurPlan).
+  const blur = async (file: string, sigma?: number) => {
+    const image = nativeImage.createFromPath(file)
+    if (image.isEmpty()) throw new Error("Not an image")
+    if (sigma === undefined) return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
+    const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
+    const plan = blurPlan(image.getSize().width, sigma, display)
+    const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
+    const size = work.getSize()
+    const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(await blurOffMain(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
+    return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
+  }
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
     renderer: "studio-gaussian-1",
-    // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
-    // blur at a work size, shown at display resolution (blurPlan).
-    blur: async (file, sigma) => {
-      const image = nativeImage.createFromPath(file)
-      if (image.isEmpty()) throw new Error("Not an image")
-      if (sigma === undefined) return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
-      const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
-      const plan = blurPlan(image.getSize().width, sigma, display)
-      const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
-      const size = work.getSize()
-      const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(await blurOffMain(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
-      return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
-    },
+    blur,
   })
   // Remote host problems never stop local startup: that host is left out and the reason logged.
   const configured = await serviceHosts(app.getPath("userData"), { ES_REMOTE_HOSTS: process.env.ES_REMOTE_HOSTS }).catch((error: unknown) => {
     console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
     return []
   })
+  // The Personal profile's look comes from its producer's private cache (descriptor + verified asset), never this
+  // laptop's pywal; created only when a Personal listener exists, so Work alone is unchanged. A Personal host on a
+  // listener (bridged, or a misconfigured proxy) gets this look or none, never Work's.
+  const personalAppearance = configured.some((host) => host.mode !== "page" && host.profile === "personal")
+    ? createAppearance({
+        directory: process.env.ES_PERSONAL_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".local/share/es-profile-appearance/personal"),
+        receipt: path.join(app.getPath("userData"), "appearance-receipt-personal.json"),
+        renderer: "studio-gaussian-1",
+        profile: "personal",
+        blur,
+      })
+    : undefined
   // This machine's own identity, reported to its pages and used as the Local row's host id.
   const self = await serviceSelf(app.getPath("userData")).catch((error: unknown) => {
     console.error("Editspace host identity ignored", { message: error instanceof Error ? error.message : "Unknown error" })
@@ -116,6 +140,9 @@ const start = async () => {
   // Hosts in the Work view (proxied app hosts; page hosts such as Personal stay their own tab), with
   // their listener origins once started. New work goes to the configured default, else the first.
   const work: WorkHost[] = []
+  const personalAggregator = configured.find((host) => host.mode === "bridged" && host.profile === "personal")?.id
+  if (!personalAggregator && configured.some((host) => host.mode === "ssh"))
+    console.error("Editspace SSH hosts ignored", { message: "no bridged Personal host to join" })
   const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
   // Bundled by the build (scripts/build.ts).
   const releaseNotes = await createReleaseNotes({
@@ -123,7 +150,10 @@ const start = async () => {
     buildInfo: path.join(app.getAppPath(), "dist/build-info.json"),
     seen: path.join(app.getPath("userData"), "release-notes-seen.json"),
   })
+  // The view each listener's page runs in, known once the window exists (Surface find enters that view's frames).
+  const viewOf: { contents?: (id: string) => Electron.WebContents | undefined } = {}
   const server = await serve({
+    find: surfaceFinder(() => viewOf.contents?.("local"), () => server.origin),
     // Only proxied Work hosts are reachable through /hosts/<id>; Personal (page or bridged) never is.
     peers: configured.filter((host) => host.mode === "proxy" && host.profile === "work").map((host) => ({ id: host.id, origin: host.origin })),
     hostInfo: () => ({ ...selfInfo, work }),
@@ -138,32 +168,66 @@ const start = async () => {
       : undefined,
     renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
     voice,
+    glassesTranscriber,
     perfDir: PERF_DIR,
   })
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
   // Each remote execution host gets its own keyed loopback listener on a stable saved port, so its
   // origin (and with it storage, drafts and receipts) stays separate from local work across launches.
   const started = await Promise.all(
-    configured.filter((host) => host.mode === "proxy").map(async (host) => {
+    configured.filter((host) => host.mode === "proxy" || host.mode === "bridged").map(async (host) => {
       const file = path.join(app.getPath("userData"), `loopback-port-${host.id}`)
+      // A bridged host's credentials stay in this process: its Access token from the Keychain item the
+      // config names, and its gateway pairing cookie encrypted with the OS key store.
+      const bridge = host.mode === "bridged" && host.access
+        ? createBridge({
+            origin: host.origin,
+            store: {
+              access: keychainAccess(host.access.keychain),
+              ...encryptedCookie(path.join(app.getPath("userData"), `bridge-${host.id}.cookie`), {
+                available: () => safeStorage.isEncryptionAvailable(),
+                encrypt: (value) => safeStorage.encryptString(value),
+                decrypt: (value) => safeStorage.decryptString(value),
+              }),
+            },
+          })
+        : undefined
+      await bridge?.ready
+      // Personal hosts read over pinned SSH join the Personal aggregator (the first bridged Personal host) as its
+      // /hosts/<id>/ peers; default off: none unless configured with mode "ssh".
+      const sshPeers = bridge && host.profile === "personal" && host.id === personalAggregator
+        ? configured.filter((item) => item.mode === "ssh" && item.ssh).map((item) => ({
+            id: item.id,
+            peer: createSshPeer({ host: { id: item.id, ...item.ssh! }, dir: path.join(app.getPath("userData"), "ssh") }),
+          }))
+        : []
       const value = Number(await readFile(file, "utf8").catch(() => "0"))
+      // This listener's own origin, known once it listens; its page asks for host info only after that.
+      const origin: { value?: string } = {}
       const listener = await serve({
         port: Number.isInteger(value) && value >= 1024 && value <= 65535 && ![4096, 7777, port].includes(value) ? value : 0,
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
-        remote: { id: host.id, origin: host.origin },
+        remote: { id: host.id, origin: host.origin, ...(bridge ? { bridge } : {}) },
+        find: surfaceFinder(() => viewOf.contents?.(host.id), () => origin.value ?? ""),
+        ...(sshPeers.length ? { sshPeers } : {}),
         // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
         voice,
-        // The look belongs to this laptop, whichever host a tab shows.
-        appearance,
+        // A Work host shows this laptop's look; a Personal host shows the Personal profile's look, never Work's.
+        appearance: host.profile === "personal" ? personalAppearance : appearance,
         // One app release, whichever host a tab shows: seen once, not per tab.
         releaseNotes,
         // Host tabs show placement natively, so the page needs no switcher of its own.
-        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
+        // A Work host's page lists the Work hosts; the Personal aggregator lists itself and its SSH peers; any other
+        // Personal page lists none. Work and Personal never see each other's hosts.
+        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [],
+          work: host.profile === "work" ? work : sshPeers.length && origin.value ? personalWork(host, configured.filter((item) => sshPeers.some((peer) => peer.id === item.id)), origin.value) : [],
+          profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
         perfDir: PERF_DIR,
       })
+      origin.value = listener.origin
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
-      return { ...host, server: listener }
+      return { ...host, server: listener, bridge }
     }).map((started) => started.catch((error: unknown) => {
       console.error("Editspace remote host listener failed", { message: error instanceof Error ? error.message : "Unknown error" })
       return undefined
@@ -172,9 +236,13 @@ const start = async () => {
   const remotes = started.filter((item) => item !== undefined)
   work.push(
     { id: selfInfo.id, label: selfInfo.label, origin: server.origin, ...(selfInfo.profile ? { profile: selfInfo.profile } : {}), ...(selfInfo.kind ? { kind: selfInfo.kind } : {}), ...(workDefault ? {} : { default: true }) },
-    ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
+    // Only Work hosts join the Work view; a bridged Personal host keeps its own tab.
+    ...remotes.filter((host) => host.profile === "work" && host.mode === "proxy").map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
   )
-  const pages = configured.filter((host) => host.mode === "page")
+  // A page host that a bridged host of the same origin and profile replaces gets no tab, read or cookie pass: its
+  // partition stays as it was, and removing the bridged entry from config brings the page tab back unchanged.
+  const shadowed = shadowedPages(configured)
+  const pages = configured.filter((host) => host.mode === "page" && !shadowed.has(host.id))
   // The Local-origin listener is the Work view: it shows every Work host's rows (this machine and each
   // proxied host), so its tab reads "Work". Each proxied host keeps its own view, opened from the
   // Hosts menu. The id stays "local" because partitions, drafts and per-origin storage are keyed by it.
@@ -224,11 +292,17 @@ const start = async () => {
           session: listenerSession(`persist:editspace-host-${host.id}`, host.server),
           kind: "app" as const,
           guard: (contents: Electron.WebContents) => guardListener(contents, host.server.origin, false),
-          within: "local",
+          // A proxied Work host is shown by the Work view; a bridged Personal host is its own tab and count.
+          within: tabWithin(host),
         })),
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences, path.join(app.getAppPath(), "dist/page-guard.cjs"))
   const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
+  viewOf.contents = (id) => (tabs ? tabs.contents(id) : id === "local" ? localContents : undefined)
+  // A wake or a display change can leave a live renderer with nothing painted: repaint the shown view only.
+  const repaint = () => { if (window.isDestroyed()) return; if (tabs) tabs.repaint(); else localContents.invalidate() }
+  powerMonitor.on("resume", repaint)
+  screen.on("display-metrics-changed", repaint)
   if (process.platform === "darwin")
     localContents.on("did-finish-load", () => {
       if (tabs) return
@@ -239,6 +313,14 @@ const start = async () => {
   // One host's app listener: same-origin navigation stays; app links to local ports belong to the Local
   // tab, and Work view links to another host's listener open in that host's own tab and partition.
   function guardListener(contents: Electron.WebContents, origin: string, local: boolean) {
+    // Cmd/Ctrl+F typed inside a Surface frame never reaches the app's own key handler (the frame is another origin):
+    // hand it to the reader, which opens its find bar.
+    contents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown" || !(input.meta || input.control) || input.alt || input.shift || input.key.toLowerCase() !== "f") return
+      if (!surfaceFrameFocused(contents.focusedFrame, contents.mainFrame)) return
+      event.preventDefault()
+      void contents.mainFrame.executeJavaScript('window.dispatchEvent(new CustomEvent("editspace-surface-find"))').catch(() => undefined)
+    })
     const open = (url: string) => {
       const target = listeners.find((item) => item.server.origin !== origin && item.id !== "local" && URL.parse(url)?.origin === item.server.origin)
       const hosted = target && appRouteURL(url, target.server.origin)
@@ -275,9 +357,43 @@ const start = async () => {
       if (!event.isMainFrame && !surfaceFrameURL(event.url, origin)) event.preventDefault()
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
+    // Chromium re-fires this as devices are discovered, each time with a fresh callback; only the latest one counts.
+    // Exactly one callback ends the request: the matching temple, or "" (cancel) off the Glasses page or on timeout.
+    let pick: { callback: (deviceId: string) => void; timer: ReturnType<typeof setTimeout> } | undefined
+    // A cancel reaches the page only as "User cancelled"; the reason goes on the document first so it can say why.
+    const tellPage = (reason: string) =>
+      contents.mainFrame.executeJavaScript(`document.documentElement.dataset.glassesPickResult = ${JSON.stringify(reason)}`).catch(() => undefined)
+    const finishPick = async (deviceId: string, reason = "") => {
+      if (!pick) return
+      clearTimeout(pick.timer)
+      const { callback } = pick
+      pick = undefined
+      if (reason) await Promise.race([tellPage(reason), new Promise<void>(resolve => setTimeout(resolve, 200))])
+      callback(deviceId)
+    }
+    // The route comes from the main frame's own location at pick time: a same-document route change (the title-bar
+    // toggle opening /glasses in the click that picks) reaches the page before contents.getURL() reports it. The
+    // listener's origin is still checked against contents.getURL(), so the gate stays "Glasses page, this origin".
+    contents.on("select-bluetooth-device", (event, devices, callback) => {
+      event.preventDefault()
+      pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => void finishPick("", "timeout"), GLASSES_PICK_MS) }
+      void contents.mainFrame.executeJavaScript("({ href: location.href, side: document.documentElement.dataset.glassesSide ?? '' })").then((value: unknown) => {
+        if (pick?.callback !== callback) return
+        const page = value as { href?: unknown; side?: unknown } | undefined
+        const decision = pickDecision({ contentsURL: contents.getURL(), pageHref: page?.href, side: page?.side, devices, origin })
+        if (decision.kind === "refuse") return void finishPick("", "not-glasses-page")
+        if (decision.kind === "pick") void finishPick(decision.deviceId)
+      }, () => { if (pick?.callback === callback) void finishPick("", "timeout") })
+    })
+    showRendererLoss(contents, origin)
   }
   // A host's own served page: its origin and its sign-in flow stay in the tab; other links open externally.
   function guardPage(contents: Electron.WebContents, origin: string) {
+    // A navigation that has not committed after PAGE_ANSWER_MS (a host or network that accepts and never answers) shows
+    // the failure page with Try again, instead of a blank view until Chromium gives up. A commit, any failure, or a
+    // navigation refused below clears it.
+    const answer = watchPageAnswer(contents, PAGE_ANSWER_MS, () =>
+      void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `no answer in ${PAGE_ANSWER_MS / 1000} s`))}`))
     contents.setWindowOpenHandler(({ url }) => {
       void openExternal(url).catch(() => console.error("External browser unavailable"))
       return { action: "deny" }
@@ -285,6 +401,9 @@ const start = async () => {
     contents.on("will-navigate", (event, url) => {
       if (pageNavigation(url, origin)) return
       event.preventDefault()
+      answer.refused()
+      // Host only: names a sign-in step the tab does not allow yet, without its path or query.
+      console.info("Editspace page tab sent a navigation to the browser", { host: URL.parse(url)?.host ?? "unknown" })
       void openExternal(url).catch(() => console.error("External browser unavailable"))
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
@@ -300,11 +419,12 @@ const start = async () => {
       // A fresh load, not reload(): Chromium keeps a reloaded navigation's cross-site status.
       if (pageArrivedCrossSite(previous, url, origin)) void contents.loadURL(url)
     })
-    // A page that cannot load says so in the tab, with a retry; it never stays blank.
+    // A page that cannot load, or whose renderer is gone, says so in the tab with Try again; it never stays blank.
     contents.on("did-fail-load", (_event, code, description, url, mainFrame) => {
       if (!mainFrame || code === -3 || url.startsWith("data:")) return
       void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, description))}`)
     })
+    showRendererLoss(contents, origin)
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   // Pair a Phone: this machine's gateway, plus each host with an owner SSH destination in
@@ -323,7 +443,11 @@ const start = async () => {
       {
         role: "viewMenu",
         submenu: [
-          { role: "reload" },
+          // Under host tabs the window has no page of its own, so the reload roles would do nothing: reload the shown host.
+          ...(tabs
+            ? [{ label: "Reload", accelerator: "CommandOrControl+R", click: () => tabs.shownContents().reload() },
+                { label: "Force Reload", accelerator: "Shift+CommandOrControl+R", click: () => tabs.shownContents().reloadIgnoringCache() }]
+            : ([{ role: "reload" }, { role: "forceReload" }] as const)),
           // Under host tabs, zoom applies to the shown host and re-fits its header beside the tabs.
           ...(tabs
             ? ([["resetzoom", "Actual Size", "CommandOrControl+0", () => 1], ["zoomin", "Zoom In", "CommandOrControl+Plus", (z: number) => Math.min(3, z + 0.1)], ["zoomout", "Zoom Out", "CommandOrControl+-", (z: number) => Math.max(0.5, z - 0.1)]] as const).map(([id, label, accelerator, next]) => ({
@@ -353,6 +477,13 @@ const start = async () => {
             : []),
           ...(tabs ? [{ type: "separator" as const }] : []),
           pairMenu,
+          // Forget pairing (h-r N3): drops this machine's gateway pairing for a bridged host; its tab then offers pairing.
+          ...remotes.flatMap((host) => (host.bridge ? [{
+            label: `Forget ${host.label} Pairing`,
+            click: () => void host.bridge!.forget().then(() => {
+              if (tabs?.selected() === host.id) void tabs.shownContents().loadURL(host.server.origin)
+            }, () => undefined),
+          }] : [])),
         ],
       },
       {
@@ -371,6 +502,7 @@ const start = async () => {
     event.preventDefault()
     state.closing = true
     appearance.close()
+    personalAppearance?.close()
     for (const partition of tabs?.sessions() ?? [isolated]) partition.flushStorageData()
     // Personal sign-in survives the restart (page-cookies.ts); every partition's cookies reach disk before quit.
     const pageSessions = pages.map((host) => session.fromPartition(`persist:editspace-host-${host.id}`))
@@ -386,10 +518,10 @@ const start = async () => {
   const restore = process.env.ES_DESKTOP_RESTORE
     ? restorePlan(await readFile(process.env.ES_DESKTOP_RESTORE, "utf8").then((text) => JSON.parse(text) as unknown).catch(() => undefined),
         [...listeners.map((item) => ({ id: item.id, origin: item.server.origin, kind: "app" as const, start: item.server.origin })),
-          ...pages.map((host) => ({ id: host.id, origin: new URL(host.origin).origin, kind: "page" as const, start: `${host.origin}/` }))])
+          ...pages.map((host) => ({ id: host.id, origin: new URL(host.origin).origin, kind: "page" as const, start: `${host.origin}/` }))], shadowed)
     : undefined
+  if (restore?.dropped) console.info("Editspace restore dropped views of replaced page hosts", { count: restore.dropped })
   if (process.env.ES_DESKTOP_RESTORE && !restore) console.error("Editspace restore ignored: invalid or unreadable record")
-  if (restore && !tabs) void localContents.loadURL(restore.views.find((item) => item.id === "local")?.url ?? server.origin)
   if (tabs) {
     restore?.views.forEach((item) => tabs.open(item.id, item.url))
     tabs.select(restore?.selected ?? "local")
@@ -399,7 +531,7 @@ const start = async () => {
       ...remotes.map((host) => ({ id: host.id, read: (path: string) => fetch(`${host.server.origin}${path}`, { headers: { "x-editspace-key": host.server.key, origin: host.server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
       // A page host is read with its own partition (its own sign-in), on its own origin, read-only.
       ...pages.map((host) => ({ id: host.id, read: (path: string) => session.fromPartition(`persist:editspace-host-${host.id}`).fetch(`${host.origin}${path}`, { credentials: "include", redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
-    ], (id, badge) => tabs.setBadge(id, badge), undefined, () => window.isVisible() && !window.isMinimized())
+    ], (id, badge, reason) => tabs.setBadge(id, badge, reason), undefined, () => window.isVisible() && !window.isMinimized())
     for (const event of ["show", "restore", "focus"] as const) window.on(event as "show", badges.refresh)
     app.on("before-quit", badges.stop)
   }
@@ -435,13 +567,24 @@ const start = async () => {
     })
     app.on("before-quit", notifications.stop)
   }
-  await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
+  // Without host tabs the window is the Work view itself: it opens on the restored route when a capture named one.
+  await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve()))
+    : localContents.loadURL(restore?.views.find((item) => item.id === "local")?.url ?? server.origin).catch(abortedByNewerNavigation))
   opened.ready = true
   if (startup.showOnLoad) window.show()
   else if (opened.requested) reveal()
   console.info(`Editspace listening at ${server.origin} (native session only)`)
   remotes.forEach((item) => console.info(`Editspace ${item.label} listening at ${item.server.origin} (native session only)`))
   pages.forEach((item) => console.info(`Editspace ${item.label} tab shows ${item.origin}`))
+}
+
+/** The first load's outcome never fails startup. A newer navigation (a notification click or an opened route during
+ * launch) replaces it, and Electron then rejects the first loadURL with ERR_ABORTED, or with the newer load's own error
+ * (seen: ERR_FAILED for the newer URL). The window already shows whatever loaded or the server's offline page; a
+ * startup error box here would block the main process behind a modal with a working window behind it. */
+const abortedByNewerNavigation = (error: unknown) => {
+  const record = error as { code?: unknown; errno?: unknown } | null
+  console.error("Editspace first load did not complete; continuing", { code: typeof record?.code === "string" ? record.code : undefined })
 }
 
 void start().catch((error: unknown) => {
@@ -460,11 +603,13 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
     const url = URL.parse(value)
     return !!url && ["http:", "ws:"].includes(url.protocol) && url.host === new URL(listener.origin).host
   }
+  // The glasses mic streams over Bluetooth, so no page needs browser microphone access.
   result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   result.setPermissionCheckHandler(() => false)
   result.on("will-download", (event) => event.preventDefault())
   result.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !own(details.url) })
+    // The failure page (main.ts showRendererLoss) is a data: document loaded by this process.
+    callback({ cancel: !own(details.url) && !details.url.startsWith("data:text/html") })
   })
   result.webRequest.onBeforeSendHeaders((details, callback) => {
     // The renderer never receives the capability protecting the loopback listener.
@@ -477,6 +622,8 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
 // A remote page's partition: secure web only, so it can never reach this machine's loopback services.
 const pageSession = (partition: string) => {
   const result = session.fromPartition(partition)
+  // Sign-in providers (Google) refuse embedded-framework user agents; a page tab presents as plain Chrome.
+  result.setUserAgent(plainChromeUserAgent(result.getUserAgent(), app.getName()))
   result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   result.setPermissionCheckHandler(() => false)
   result.on("will-download", (event) => event.preventDefault())
@@ -484,6 +631,25 @@ const pageSession = (partition: string) => {
     callback({ cancel: !/^(https|wss|data|blob):/.test(details.url) })
   })
   return result
+}
+
+// A view whose renderer is gone (crash, out of memory, killed) shows the failure page with Try again (a fresh load of
+// its own origin) instead of a blank view; its partition, cookies and storage are untouched.
+/** How long a page host's navigation may go without an answer before its tab says so. */
+const PAGE_ANSWER_MS = Number(process.env.ES_DESKTOP_PAGE_ANSWER_MS) || 20_000
+
+const showRendererLoss = (contents: Electron.WebContents, origin: string) => {
+  contents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit" || contents.isDestroyed()) return
+    void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `renderer ${details.reason}`))}`)
+  })
+  // Try again on the failure page loads the view's own origin from this process: a link from a data: document would
+  // arrive cross-site, which a listener refuses and which withholds a page host's Strict cookies.
+  contents.on("will-navigate", (event, url) => {
+    if (!contents.getURL().startsWith("data:") || URL.parse(url)?.origin !== origin) return
+    event.preventDefault()
+    void contents.loadURL(url)
+  })
 }
 
 const pageFailure = (origin: string, reason: string) => {

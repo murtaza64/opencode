@@ -12,7 +12,10 @@ export const eventMux = (options: {
   // this, host-qualified subscriptions fail individually and the socket's other streams continue.
   hostUpstream?: (host: string, prefix: "/oc" | "/es", requested: URL) => { url: string; headers?: HeadersInit }
   rejectUnknown?: boolean
+  /** First and longest wait before an upstream that closed for good is subscribed again (ms). */
+  retry?: { first: number; max: number }
 }) => {
+  const retry = options.retry ?? { first: 1000, max: 30_000 }
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 })
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const pathname = request.url?.split("?")[0] ?? ""
@@ -31,7 +34,7 @@ export const eventMux = (options: {
     const origin = options.origin(request)
     sockets.handleUpgrade(request, socket, head, (client) => {
       const prefix = pathname === eventMuxPaths.opencode ? "/oc" : "/es"
-      const streams = new Map<number, EventSource>()
+      const streams = new Map<number, { close: () => void }>()
       const send = (packet: EventPacket) => {
         if (client.readyState !== WebSocket.OPEN) return
         if (client.bufferedAmount > 4 * 1024 * 1024) {
@@ -88,19 +91,42 @@ export const eventMux = (options: {
           send({ id, type: "error", code: 502 })
           return
         }
-        const source = new EventSource(target.url, {
-          fetch: (input, init) => {
-            const headers = new Headers(init?.headers)
-            new Headers(target.headers).forEach((value, name) => headers.set(name, value))
-            if (lastEventId && !headers.has("last-event-id")) headers.set("last-event-id", lastEventId)
-            // An upstream may require its own origin (a remote dashboard); otherwise present the app origin.
-            if (!headers.has("origin")) headers.set("origin", origin)
-            return fetch(input, { ...init, headers, redirect: "error" })
-          },
-        })
-        streams.set(id, source)
-        source.onopen = () => send({ id, type: "open" })
-        source.onmessage = (event) => {
+        // EventSource retries a dropped connection itself, but an error answer (non-200, or not an event stream) closes it
+        // for good. Such a subscription is opened again here with backoff until it is unsubscribed, so a host that answers
+        // 503 during a restart comes back without the client resubscribing; "open" is sent when it does.
+        let source: EventSource | undefined
+        let timer: ReturnType<typeof setTimeout> | undefined
+        let delay = retry.first
+        let closed = false
+        const connect = () => {
+          const current = new EventSource(target.url, {
+            fetch: (input, init) => {
+              const headers = new Headers(init?.headers)
+              new Headers(target.headers).forEach((value, name) => headers.set(name, value))
+              if (lastEventId && !headers.has("last-event-id")) headers.set("last-event-id", lastEventId)
+              // An upstream may require its own origin (a remote dashboard); otherwise present the app origin.
+              if (!headers.has("origin")) headers.set("origin", origin)
+              return fetch(input, { ...init, headers, redirect: "error" })
+            },
+          })
+          source = current
+          current.onopen = () => {
+            delay = retry.first
+            send({ id, type: "open" })
+          }
+          current.onmessage = (event) => onMessage(event)
+          current.onerror = (event) => {
+            send({ id, type: "error", code: event.code })
+            if (closed || current.readyState !== EventSource.CLOSED) return
+            timer = setTimeout(() => {
+              timer = undefined
+              if (!closed) connect()
+            }, delay)
+            delay = Math.min(delay * 2, retry.max)
+          }
+        }
+        streams.set(id, { close: () => { closed = true; clearTimeout(timer); source?.close() } })
+        const onMessage = (event: MessageEvent<string>) => {
           lastEventId = event.lastEventId
           // Drop unsubscribed types here, before the double JSON encode, the
           // socket, and two renderer-side parses. The first "type" key is the
@@ -112,7 +138,7 @@ export const eventMux = (options: {
           }
           send({ id, type: "message", data: event.data, lastEventId })
         }
-        source.onerror = (event) => send({ id, type: "error", code: event.code })
+        connect()
       })
       client.on("error", () => client.close())
       client.on("close", () => {

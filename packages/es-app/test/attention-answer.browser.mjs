@@ -8,6 +8,8 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const FLEET = "i like the direction of A and C"
 const preview = await startAttentionPreview()
 preview.ledger.records[0].lane = "orchestrator"
+// This file covers notes and choices without a recommendation (decision-recommended covers the preselected draft).
+preview.ledger.records[0].recommendation = null
 preview.ledger.records.push({ ...preview.ledger.records[1], id: "uncommitted", editspace: "fixture", title: "Uncommitted first attempt", gate_key: "fixture:uncommitted:v1", lane: "work" })
 preview.ledger.records.push({ ...preview.ledger.records[1], id: "open_ended", editspace: "fixture", title: "What should the release note say?", options: [], recommendation: null, gate_key: "fixture:note:v1", lane: null, source_ref: { ...preview.ledger.records[1].source_ref, session_id: "ses_top" } })
 const browser = await chromium.launch({ channel: "chrome", headless: true })
@@ -26,11 +28,12 @@ const open = async (viewport, key = "attention:fixture:decision_1") => {
 try {
   const { context, page } = await open({ width: 1440, height: 1000 })
   const record = page.locator('[data-attention-id="decision_1"]')
-  const answer = record.getByRole("textbox", { name: /Note \(optional\)/ })
+  await record.getByRole("button", { name: "Type something…" }).click()
+  const answer = record.getByRole("textbox", { name: "Your answer" })
   await expect(answer).toBeEnabled()
-  await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
+  await expect(record.getByRole("button", { name: "Send", exact: true })).toBeDisabled()
   await answer.fill("   ")
-  await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
+  await expect(record.getByRole("button", { name: "Send", exact: true })).toBeDisabled()
   await answer.fill(FLEET)
   await expect(record.locator(".home-answer")).toContainText("To orchestrator")
   await expect(record.locator(".home-answer")).not.toContainText("tool approval")

@@ -167,4 +167,47 @@ describe("ModelsDevPlugin", () => {
         }),
     ),
   )
+
+  it.live("a models.dev refresh rebuilds Location catalogs one at a time and folds a burst of refreshes", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const catalog = yield* Catalog.Service
+      const events = yield* EventV2.Service
+      const models = ModelsDev.Service.of({ get: () => Effect.succeed({}), refresh: () => Effect.void })
+      let active = 0
+      let peak = 0
+      const runs: string[] = []
+      const block = (ms: number) => Effect.sync(() => { const until = Date.now() + ms; while (Date.now() < until) {} })
+      // Each rebuild blocks the event loop in chunks with async points between them, like a real catalog rebuild.
+      const rebuild = (name: string) =>
+        Effect.gen(function* () {
+          active++
+          peak = Math.max(peak, active)
+          yield* block(20)
+          yield* Effect.sleep("1 millis")
+          yield* block(20)
+          runs.push(name)
+          active--
+        })
+      const locations = ["a", "b", "c", "d"]
+      for (const name of locations) {
+        yield* ModelsDevPlugin.effect(
+          host({
+            catalog: { ...catalogHost(catalog), reload: () => rebuild(name) },
+            integration: { ...integrationHost(integrations), reload: () => Effect.void },
+          }),
+        ).pipe(Effect.provideService(ModelsDev.Service, models))
+      }
+      // A burst of five announcements: each Location rebuilds once for it plus at most once more for those that
+      // arrived during its rebuild.
+      for (let i = 0; i < 5; i++) yield* events.publish(ModelsDev.Event.Refreshed, {})
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1500)))
+      expect(peak).toBe(1)
+      for (const name of locations) {
+        const count = runs.filter((run) => run === name).length
+        expect(count).toBeGreaterThanOrEqual(1)
+        expect(count).toBeLessThanOrEqual(2)
+      }
+    }),
+  )
 })

@@ -1,5 +1,5 @@
-// Review items (ATTN-15): an open review is a "Try" row in Needs you; its view leads with the artifact link and
-// revision, the context as what to check, and Done plus the problem option. Opening the link writes nothing and
+// Review items (ATTN-15): an open review is a "Try" row in Needs you; its view puts an Open <artifact> · rev button beside
+// the title, the context as what to check, and Done plus the problem option. Opening the link writes nothing and
 // leaves it open; Done answers it. No brief is shown for it. Also checked at 390px wide in RTL.
 // Disposable fixture. Run from packages/es-app: node test/review-item.browser.mjs
 import { createRequire } from "node:module"
@@ -35,10 +35,10 @@ try {
 
   await row.click()
   const view = page.locator("article.home-decision[data-attention-id=review_1]")
-  const link = view.getByRole("link", { name: "Brief gallery" })
+  const link = view.getByRole("link", { name: "Open Brief gallery, revision 85a6db13 (opens outside the app)" })
   await expect(link).toHaveAttribute("href", artifact.url)
   await expect(link).toHaveAttribute("target", "_blank")
-  await expect(view.locator(".review-artifact")).toContainText("revision 85a6db13")
+  await expect(link).toHaveText(/Open Brief gallery · rev 85a6db13/)
   await expect(view.locator(".home-request-text")).toContainText("check item rows don't wrap")
   await expect(view.getByRole("button", { name: "Done, looks right" })).toBeEnabled()
   await expect(view.getByRole("button", { name: "Found a problem" })).toBeVisible()

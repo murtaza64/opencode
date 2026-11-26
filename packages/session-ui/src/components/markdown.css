@@ -121,8 +121,7 @@
     margin: 0;
   }
 
-  li:has(> input[type="checkbox"]),
-  li:has(> p > input[type="checkbox"]) {
+  li[data-task] {
     position: relative;
     list-style-type: none;
   }

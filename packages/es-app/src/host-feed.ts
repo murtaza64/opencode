@@ -13,7 +13,7 @@ import { loadSeen, saveSeen } from "./last-seen"
 import type { Handoff, LaneOwner } from "./handoffs"
 import type { HomeRequestRow } from "./home-requests"
 import type { NeedsYouInputs } from "./needs-you"
-import type { Surface } from "./surfaces"
+import type { Surface, SurfaceTombstone } from "./surfaces"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -62,6 +62,8 @@ export type HostFeedState = {
   surfaces: Surface[]
   /** The Surface list could not be read on the last attempt. */
   surfacesStale?: boolean
+  /** That host's withdrawn Surfaces (tombstones), when it reports them. */
+  withdrawn?: SurfaceTombstone[]
   /** That host's dashboard serves no Surfaces (404/501): a plain fact, not an outage. */
   surfacesUnsupported?: boolean
 }
@@ -120,7 +122,14 @@ export const reachOf = (state: Pick<HostFeedState, "status" | "reason" | "since"
 
 const LIST_MS = 5000
 const DECISIONS_MS = 30_000
+// Status reads per refresh, one per listed directory; sessions beyond this many directories read as unknown.
+const MAX_STATUS_DIRECTORIES = 24
 const LINEAGE_MS = 60_000
+// A row new to the list may be a lane's handoff successor, whose owner is stamped just after it appears (es spawn:
+// create, prompt, then stamp). For a short window lineage is re-read on each list read, so a lane pin moves to the
+// successor within seconds instead of at the next interval.
+const FOLLOW_MS = 30_000
+const FOLLOW_GAP_MS = 3_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
 
 /** That host's handoff lineage, per editspace (lane names repeat across editspaces), and which editspace holds a
@@ -133,7 +142,9 @@ const MAX_LINEAGE_EDITSPACES = 4
  * this host's pinned sessions; in All projects, lineage is read only for the editspaces that hold them. */
 export const createHostFeed = (host: WorkHost, project: () => string | undefined | null, pinned: () => string[] = () => [],
   // Editspaces named by this host's lane pins: always read, so a pinned lane resolves to its current owner.
-  lanes: () => string[] = () => []) => {
+  lanes: () => string[] = () => [],
+  // How often decisions, Surfaces and statuses are read between list reads (tests shorten it).
+  every = DECISIONS_MS) => {
   const base = `/hosts/${host.id}`
   // Until the first read answers, show what this host last listed (if the project matches), marked by its age.
   const seen = (() => {
@@ -150,8 +161,51 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
+  // Sessions whose status could not be read (their directory's read failed or was over the bound): unknown, never the
+  // last busy nor a guessed idle. The next good read clears them.
+  const [unread, setUnread] = createSignal<ReadonlySet<string>>(new Set())
+  // Status events seen per session, numbered in arrival order. A status read applies to a session only when no event
+  // for it arrived after the read began, so a seed never overwrites a newer transition.
+  let statusEvents = 0
+  const lastEvent = new Map<string, number>()
+  // When that host's event stream last dropped (in status-event counts), and when each session's status was last read:
+  // a status older than the drop is not authoritative until read again (Personal032 Core OOM, orchestrator #818/#826).
+  const [droppedAt, setDroppedAt] = createSignal<number>()
+  const seededAt = new Map<string, number>()
+  // That host's Core keeps session status per directory (one Instance each): `/session/status` answers only for the
+  // directory it is asked about, so each listed session is read in its own directory. Sessions only seen in events
+  // (not listed) keep their event status.
+  const seedLive = async (listed: { id: string; directory: string }[]) => {
+    // One sequence for events, reads and drops, so "after the drop" holds even when no event arrived in between.
+    const started = ++statusEvents
+    const byDirectory = listed.reduce((groups, session) => groups.set(session.directory, [...(groups.get(session.directory) ?? []), session]),
+      new Map<string, { id: string; directory: string }[]>())
+    const directories = [...byDirectory.keys()]
+    const answers = await Promise.all(directories.slice(0, MAX_STATUS_DIRECTORIES).map((directory) =>
+      read<Record<string, { type?: unknown } | string>>(`/oc/session/status?directory=${encodeURIComponent(directory)}`)
+        .then((statuses) => statuses && typeof statuses === "object" ? statuses : undefined, () => undefined)))
+    const missing = new Set<string>()
+    const seen = new Map<string, string>()
+    directories.forEach((directory, index) => {
+      const statuses = answers[index]
+      for (const session of byDirectory.get(directory)!) {
+        if (!statuses) { missing.add(session.id); continue }
+        const value = statuses[session.id]
+        // A directory's status list names only its sessions that are not idle.
+        seen.set(session.id, typeof value === "string" ? value : typeof value?.type === "string" ? value.type : "idle")
+      }
+    })
+    setUnread(new Set([...missing].filter((id) => (lastEvent.get(id) ?? -1) < started)))
+    for (const id of seen.keys()) seededAt.set(id, started)
+    setLive((previous) => {
+      const next = { ...previous }
+      for (const [id, value] of seen) if ((lastEvent.get(id) ?? -1) < started) next[id] = value
+      return next
+    })
+  }
   const [lineage, setLineage] = createSignal<HostLineage>()
   let lastLineageRead = 0
+  let followUntil = 0
   let lineageRead: Promise<void> | undefined
   let loading: Promise<void> | undefined
   const read = async <T,>(path: string) => {
@@ -179,7 +233,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       requests: requests?.filter((request) => current.project === undefined || request.project === current.project),
     }
   }
-  type SurfaceRead = { surfaces: Surface[] } | { unsupported: true } | undefined
+  type SurfaceRead = { surfaces: Surface[]; withdrawn?: SurfaceTombstone[] } | { unsupported: true } | undefined
   const readSurfaces = async (): Promise<SurfaceRead> => {
     const current = scope
     if (!current) return undefined
@@ -193,9 +247,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       await response?.body?.cancel()
       return undefined
     }
-    const body = (await response.json().catch(() => undefined)) as { surfaces?: Surface[] } | undefined
+    const body = (await response.json().catch(() => undefined)) as { surfaces?: Surface[]; withdrawn?: SurfaceTombstone[] } | undefined
     if (!Array.isArray(body?.surfaces)) return undefined
-    return { surfaces: body.surfaces.filter((surface) => current.project === undefined || surface.editspace === current.project) }
+    return { surfaces: body.surfaces.filter((surface) => current.project === undefined || surface.editspace === current.project),
+      withdrawn: Array.isArray(body.withdrawn) ? body.withdrawn : [] }
   }
   // Each part keeps its last-known rows for the same project when its read failed, marked stale.
   const merged = (previous: HostFeedState, same: boolean, needs: Awaited<ReturnType<typeof readNeeds>>, surfaces: SurfaceRead) => ({
@@ -205,6 +260,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     requestsStale: !needs.requests,
     surfaces: surfaces && "surfaces" in surfaces ? surfaces.surfaces : surfaces ? [] : same ? previous.surfaces : [],
     surfacesStale: !surfaces,
+    withdrawn: surfaces && "surfaces" in surfaces ? surfaces.withdrawn ?? [] : same ? previous.withdrawn : [],
     surfacesUnsupported: !!surfaces && "unsupported" in surfaces,
   })
   const readLineage = async (es: string) => {
@@ -225,7 +281,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     // host's own editspace roots.
     const all = !!current && current.project === undefined
     const key = all ? "*" : current?.es
-    if (!key || (all && !pinned().length && !lanes().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
+    if (!key || (all && !pinned().length && !lanes().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < (Date.now() < followUntil ? FOLLOW_GAP_MS : LINEAGE_MS)) return
     lastLineageRead = Date.now()
     const same = () => (scope?.project === undefined ? "*" : scope?.es) === key && state().status === "ready"
     lineageRead = (async () => {
@@ -268,8 +324,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         setLineage(undefined)
         lastLineageRead = 0
       }
-      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
+      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(sessions.map((session) => ({ id: session.id, directory: session.directory })))])
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
+      const listed = state().checkedAt ? new Set(state().rows.map((row) => row.id)) : undefined
+      if (same && listed && (pinned().length || lanes().length) && rows.some((row) => !listed.has(row.id))) followUntil = Date.now() + FOLLOW_MS
       saveSeen(host.id, rows, name)
       setState((previous) => ({
         checkedAt: Date.now(),
@@ -296,7 +354,8 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     refreshLineage()
     const current = scope
     if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
-    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
+    // Statuses too: a missed idle event (no other event follows it) clears within one interval without a reconnect.
+    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(state().rows.map((row) => ({ id: row.id, directory: row.directory })))])
     if (scope !== current) return
     setState((previous) => ({ ...previous, ...merged(previous, true, needs, surfaces) }))
   }
@@ -310,7 +369,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   const changed = coalesced(() => void load(), LIST_MS)
   const source = createServerEvents(`${base}/oc/global/event`, { types: SESSION_EVENTS })
   let dropped = false
-  source.onerror = () => (dropped = true)
+  source.onerror = () => {
+    dropped = true
+    setDroppedAt(++statusEvents)
+  }
   source.onopen = () => {
     if (!dropped) return
     dropped = false
@@ -323,12 +385,14 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     if (event?.type === "session.status" && typeof event.properties?.sessionID === "string") {
       const id = event.properties.sessionID
       const type = typeof event.properties.status?.type === "string" ? event.properties.status.type : "idle"
+      lastEvent.set(id, ++statusEvents)
+      if (unread().has(id)) setUnread((previous) => new Set([...previous].filter((item) => item !== id)))
       setLive((previous) => previous[id] === type ? previous : { ...previous, [id]: type })
       return
     }
     changed()
   }
-  const timer = setInterval(() => void refreshDecisions(), DECISIONS_MS)
+  const timer = setInterval(() => void refreshDecisions(), every)
   onCleanup(() => {
     source.close()
     changed.cancel()
@@ -339,8 +403,15 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     host,
     state,
     lineage,
-    /** Live status from that host's events since load ("busy", "retry", "idle"); undefined if unseen. */
-    live: (id: string) => live()[id],
+    /** Status from that host's last status read and its events since ("busy", "retry", "idle"); "unknown" when the last
+     * status read failed or the host is unreachable; undefined if unseen. */
+    live: (id: string) => {
+      if (unread().has(id) || state().status === "unavailable") return "unknown"
+      const drop = droppedAt()
+      // Neither an event nor a read since the stream dropped: not authoritative.
+      if (drop !== undefined && live()[id] !== undefined && Math.max(lastEvent.get(id) ?? -1, seededAt.get(id) ?? -1) < drop) return "unknown"
+      return live()[id]
+    },
     /** Reload this host's list now (project change, retry). */
     load,
   }

@@ -972,3 +972,19 @@ test("older pages carry their step parts; message.removed drops them", async () 
   SessionEvents.current.send("message.removed", { sessionID: "ses_current", messageID: "msg_005" })
   expect(live.data.step.msg_005).toBeUndefined()
 })
+
+test("Reconnect opens a fresh session stream: the dead one is closed and the banner clears when the new one opens", async () => {
+  const live = start()
+  await live.load()
+  const dead = SessionEvents.current
+  dead.onerror?.()
+  expect(live.connectionError()).toContain("Session connection lost")
+  await live.reconnect()
+  expect(dead.closed).toBe(true)
+  expect(SessionEvents.current).not.toBe(dead)
+  SessionEvents.current.onopen?.()
+  expect(live.connectionError()).toBe("")
+  // Events arrive on the new stream only.
+  busy()
+  expect(live.data.session_status.ses_current.type).toBe("busy")
+})

@@ -29,6 +29,7 @@ export const createFixture = async () => {
   const fixture = {
     sessionIDs: ["ses_a", "ses_b"],
     status: "busy",
+    openrouterUsage: undefined,
     capabilities: true,
     updateInput: false,
     holdInputUpdate: false,
@@ -114,6 +115,8 @@ export const createFixture = async () => {
     createReplies: [],
     created: [],
     workspaceSessions: [],
+    /** Extra /session/status entries (sessionID -> { type }). */
+    extraStatus: {},
     emit(type, properties) {
       for (const response of streams) response.write(`data: ${JSON.stringify({ type, properties })}\n\n`)
     },
@@ -152,6 +155,8 @@ export const createFixture = async () => {
       response.writeHead(status, { "content-type": "application/json" })
       response.end(JSON.stringify(value))
     }
+    if (url.pathname === "/api/usage/openrouter" && request.method === "GET")
+      return fixture.openrouterUsage ? json(fixture.openrouterUsage) : json({ error: "Not found" }, 404)
     const childMatch = /^\/session\/([^/]+)(\/message)?$/.exec(url.pathname)
     const child = childMatch && fixture.children.get(childMatch[1])
     if (child && request.method === "GET") {
@@ -169,6 +174,8 @@ export const createFixture = async () => {
     if (["/event", "/global/event", "/api/events", "/api/notification-events"].includes(url.pathname)) {
       // A dropped stream that stays down: reconnects are refused while set (preview phase replay, "offline").
       if (fixture.refuseEvents && url.pathname === "/event") return json({ error: "event stream unavailable" }, 503)
+      // Core restarting: the global stream is down until a test clears this.
+      if (fixture.refuseGlobalEvents && url.pathname === "/global/event") return json({ error: "event stream unavailable" }, 503)
       if (fixture.eventAuthorization && request.headers.authorization !== fixture.eventAuthorization) {
         response.writeHead(401, { "www-authenticate": 'Basic realm="fixture"', "content-type": "application/json" })
         response.end(JSON.stringify({ error: "Authentication required" }))
@@ -248,6 +255,10 @@ export const createFixture = async () => {
     if (url.pathname === "/api/frontdesk/ignored-failures" && request.method === "GET") return json({ format: "front-desk-ignored-failures/1", entries: [] })
     // Passive-review wake records; none unless a test sets fixture.wakeEvents.
     if (url.pathname === "/api/wake-events") return json({ events: fixture.wakeEvents?.(url.searchParams.get("session")) ?? [] })
+    // Wake state + Wake now (es.mail.wake/v1, DD #414): absent unless a test sets fixture.mailWake(method, params, body).
+    if (url.pathname === "/api/mail/wake") return fixture.mailWake
+      ? (({ status = 200, body: payload }) => json(payload, status))(fixture.mailWake(request.method, url.searchParams, body))
+      : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/mail") return fixture.mail
       ? json(fixture.mail(url.searchParams.get("es"), url.searchParams.get("lane") ?? url.searchParams.get("session")))
       : json({ detail: "Not Found" }, 404)
@@ -257,6 +268,17 @@ export const createFixture = async () => {
       : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/lane-provenance" && request.method === "GET")
       return json(fixture.laneProvenance?.(url.searchParams.get("es")) ?? { delegations: [], spawned: [] })
+    // Front Desk home pointer (src/desk-pointer.ts): not deployed unless a test sets fixture.pointer.
+    if (url.pathname === "/api/frontdesk/pointer" && request.method === "GET")
+      return fixture.pointer ? json(fixture.pointer) : json({ detail: "Not Found" }, 404)
+    // Compare-and-swap like the dashboard: create only while the home has no desk.
+    if (url.pathname === "/api/frontdesk/pointer" && request.method === "PUT" && fixture.pointer?.home) {
+      if (body.expected_revision !== fixture.pointer.revision || (body.reason === "create" && !fixture.pointer.none)) return json(fixture.pointer, 409)
+      fixture.pointer = { home: true, revision: fixture.pointer.revision + 1, session: body.session, directory: body.directory, reason: body.reason }
+      return json(fixture.pointer)
+    }
+    // Persona registry (agent names and avatars): empty unless a test sets fixture.personas.
+    if (url.pathname === "/api/personas" && request.method === "GET") return json({ personas: fixture.personas ?? [] })
     // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
     if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")
@@ -331,7 +353,7 @@ export const createFixture = async () => {
             time: { ...(typeof value === "string" ? session(value).time : value.time), ...(fixture.archived.has(typeof value === "string" ? value : value.id) ? { archived: 5 } : {}) },
           })),
       )
-    if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
+    if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" }, ...fixture.extraStatus })
     // Title-bar daily spend (today-cost.ts): an older Core without the route; the badge stays hidden.
     if (url.pathname === "/experimental/usage/daily") return json({ error: "Not found" }, 404)
     if (url.pathname === "/config/providers")
@@ -456,12 +478,18 @@ export const createFixture = async () => {
       if (action === "/todo" && request.method === "GET") return json(fixture.todos?.get(id) ?? [])
       const single = /^\/message\/([^/]+)$/.exec(action)
       if (single && request.method === "GET") {
-        const found = (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB).find((message) => message.info.id === single[1])
+        const found = (fixture.messagesBySession?.[id] ?? (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB)).find((message) => message.info.id === single[1])
         return found ? json(found) : json({ name: "NotFoundError", data: { message: `Message not found: ${single[1]}` } }, 404)
+      }
+      // One message by id (src/api.ts message): 404 when this session has none.
+      if (action.startsWith("/message/") && request.method === "GET" && !action.includes("/part/")) {
+        const found = (fixture.messages ?? []).find((item) => item.info.id === decodeURIComponent(action.slice("/message/".length)) && item.info.sessionID === id)
+        return found ? json(found) : json({ error: "not found" }, 404)
       }
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
-        const all = id === "ses_a"
+        // Per-session transcripts when a test sets fixture.messagesBySession (continuous transcript chains).
+        const all = fixture.messagesBySession?.[id] ?? (id === "ses_a"
           ? (fixture.messages ?? [
                 {
                   info: {
@@ -492,7 +520,7 @@ export const createFixture = async () => {
                   parts: [],
                 },
             ])
-          : fixture.messagesB
+          : fixture.messagesB)
         const before = url.searchParams.get("before")
         const eligible = before ? all.filter((message) => message.info.id < before) : all
         const messages = limit ? eligible.slice(-Number(limit)) : eligible

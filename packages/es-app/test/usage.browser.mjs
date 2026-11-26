@@ -22,7 +22,7 @@ const rollup = {
   days: [
     { day: day(0), cost: 12.345, models: [
       { provider: "anthropic", model: "claude-opus", cost: 11.2, tokens: tokens(2_400_000, 90_000) },
-      { provider: "openai", model: "gpt-5", cost: 1.145, tokens: tokens(300_000, 20_000) },
+      { provider: "openrouter", model: "gpt-5", cost: 1.145, tokens: tokens(300_000, 20_000) },
       { provider: "gateway", model: "internal-model", cost: 0, tokens: tokens(50_000, 4_000) },
     ] },
     { day: day(1), cost: 40, models: [{ provider: "anthropic", model: "claude-opus", cost: 40, tokens: { input: 0, output: 50_000, reasoning: 0, cache: { read: 5_000_000, write: 900_000 } } }] },
@@ -33,13 +33,43 @@ const rollup = {
     { provider: "anthropic", observedAt: new Date().toISOString(), headers: {}, requests: { limit: 4000, remaining: 3990 }, tokens: { limit: 2_000_000, remaining: 1_500_000, reset: "2026-10-27T22:00:00Z" } },
   ] },
 }
+let oriState = "ok"
 let mode = "json"
+let quota = "missing"
+const soon = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString()
+const quotaView = () => ({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [
+  { provider: "claude", state: "ok", source: "claude-statusline", observedAt: new Date().toISOString(), windows: [
+    { id: "five_hour", usedPercent: 42, resetsAt: soon(150) }, { id: "seven_day", usedPercent: 7, resetsAt: soon(3 * 1440 + 90) }] },
+  { provider: "codex", state: "ok", source: "codex-app-server", observedAt: new Date().toISOString(), pinned: false, windows: [
+    { id: "codex/primary", usedPercent: 10, resetsAt: soon(45), windowDurationMins: 300 }] },
+] })
+const quotaStates = () => ({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [
+  { provider: "claude", state: "stale", source: "claude-statusline", observedAt: soon(-420), staleSince: soon(-60), windows: [{ id: "five_hour", usedPercent: 88, resetsAt: soon(-60) }] },
+  { provider: "codex", state: "not-configured", windows: [] },
+] })
 let sessions = "missing"
 const reads = []
 const sessionReads = []
 const preview = await startAttentionPreview([{
   name: "usage-fixture",
+  enforce: "pre",
   configureServer(server) {
+    server.middlewares.use("/es/api/quota", (_req, res) => {
+      if (quota === "missing") { res.writeHead(404); return res.end() }
+      if (quota === "malformed") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [{ provider: "claude", state: "unavailable", reason: "invalid", windows: [] }] })) }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify(quota === "states" ? quotaStates() : quotaView()))
+    })
+    server.middlewares.use("/es/api/usage/openrouter", (_req, res) => {
+      if (oriState === "missing") { res.writeHead(404); return res.end() }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify({ schema: "es-openrouter-usage/1", state: oriState === "partial" ? "ok" : oriState,
+        observedAt: new Date().toISOString(), reason: "billing-read-failed", credits_usd: 125, external_byok_usd: 20, total_inference_usd: 145,
+        credits_today_utc_usd: 0, external_byok_today_utc_usd: oriState === "partial" ? null : 17.25,
+        key_limit_usd: 2000, key_remaining_usd: 1800, include_byok_in_key_limit: false,
+        expires_at: "2027-01-01T12:00:00Z", effective_budget: { spend_usd: 125, limit_usd: 2000, remaining_usd: 1875, include_byok: false },
+      }))
+    })
     server.middlewares.use("/oc/experimental/usage/sessions", (req, res) => {
       if (req.headers["x-under-test"]) sessionReads.push(req.url)
       if (sessions === "missing") { res.writeHead(404); return res.end() }
@@ -70,6 +100,19 @@ const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
 try {
   await page.goto(`${preview.url}/usage`, { waitUntil: "domcontentloaded", timeout: 180_000 })
+  const ori = page.getByRole("region", { name: "Inference usage" })
+  await expect(ori.locator(".ori-number")).toHaveText("$17.25")
+  await expect(ori).toContainText("spent today")
+  // BYOK is not limited by the key's credit limit: no limit bar or remaining credit is shown.
+  await expect(ori.getByRole("progressbar")).toHaveCount(0)
+  await expect(ori).not.toContainText("$2,000")
+  await expect(ori).not.toContainText("left")
+  await expect(ori.locator(".ori-outside")).toContainText("$11.20 + unpriced")
+  await expect(page.locator(".usage-details")).not.toHaveAttribute("open")
+  await ori.locator(".ori-breakdown summary").click()
+  await expect(ori).toContainText("Today (UTC): $0.00 from OpenRouter credits · $17.25 billed to provider.")
+  await page.locator(".usage-details > summary").click()
+  console.log("PASS Ori: daily spend, no credit-limit bar, scoped outside estimate, expandable detail")
   const total = page.locator("[data-usage-total]")
   await expect(total).toHaveText("$12.35")
   await expect(page.locator(".usage-today")).toContainText("ONLY · ESTIMATE")
@@ -115,7 +158,7 @@ try {
   console.log("PASS usage v2: 7/30-day stacked trend, keyboard + table fallback, unknown day not $0, model table, cuts, sessions gated")
   await expect(page.getByLabel("Rate limits")).toContainText("Not a plan or subscription quota.")
   await expect(page.getByLabel("Rate limits")).toContainText("3,990 of 4,000 requests left")
-  // The page reads 7 days; the title-bar total reads today only.
+  // Historical rollup and today's outside-Ori estimate load independently.
   const pageReads = () => reads.filter((url) => url.includes("days=30"))
   await expect.poll(() => pageReads().length).toBe(1)
   expect(pageReads()[0]).toContain("days=30")
@@ -126,17 +169,29 @@ try {
   expect(reads).toHaveLength(before)
   console.log("PASS usage: this-host estimate, by model, 7 days, missing pricing not free, incomplete coverage, rate limits not quota, one read")
 
-  await page.getByRole("button", { name: "Refresh", exact: true }).click()
-  await expect.poll(() => pageReads().length).toBe(2)
+  oriState = "partial"
+  await ori.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(ori.locator(".ori-number")).toHaveText("not reported")
+  await expect(ori).toContainText("$145.00 since this key was created")
+  const beforeUnavailable = pageReads().length
+  oriState = "unavailable"
+  await ori.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(ori).toContainText("OpenRouter usage unavailable: billing-read-failed")
+  await expect.poll(() => pageReads().length).toBeGreaterThan(beforeUnavailable)
   await page.setViewportSize({ width: 390, height: 800 })
   await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "no horizontal overflow at 390px RTL").toBe(true)
   await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
   await page.setViewportSize({ width: 1280, height: 860 })
-  console.log("PASS usage: Refresh reads once; 390px RTL has no horizontal overflow")
+  console.log("PASS usage: Refresh reloads history; 390px RTL has no horizontal overflow")
 
+  oriState = "missing"
   sessions = "present"
   await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(ori).toContainText("OpenRouter usage not reported on this dashboard")
+  await expect(ori.getByRole("progressbar")).toHaveCount(0)
+  await page.locator(".usage-details > summary").click()
+  console.log("PASS Ori: unavailable reason on Refresh and older dashboard 404")
   const rows2 = page.locator(".usage-sessions li")
   await expect(rows2).toHaveCount(2)
   await expect(rows2.nth(0)).toContainText("es-app: delivery lead")
@@ -153,8 +208,8 @@ try {
   await page.waitForTimeout(1000)
   expect(sessionReads.length).toBe(since + 1)
   const daily = reads.length
-  await page.getByRole("button", { name: "Refresh", exact: true }).click()
-  await expect.poll(() => reads.length).toBe(daily + 1)
+  await ori.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect.poll(() => reads.length).toBe(daily + 2)
   await expect.poll(() => sessionReads.length).toBe(since + 2)
   // Directory grouping: lanes by folder, labelled as such, never as a project.
   await page.getByRole("radio", { name: "Directories" }).click()
@@ -166,12 +221,53 @@ try {
   await expect(page.getByLabel("Top sessions")).toContainText("Not a project or workstream.")
   console.log("PASS usage v2: per-session ranking; unpriced not $0; one sessions read per window, Refresh re-reads; lane/directory grouping")
 
+  const section = page.locator("[data-usage-quota]")
+  await expect(section).toHaveCount(0)
+  quota = "ok"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section).toContainText("Separate from API spend and token activity.")
+  const claude = section.locator('[data-quota-provider="claude"]')
+  await expect(claude.locator(".usage-quota-bar")).toHaveCount(2)
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText("5-hour")
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText("42% used")
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText(/resets in 2h (29|30|31)m/)
+  await expect(claude.locator(".usage-quota-bar").nth(1)).toContainText(/resets in 3d 1h/)
+  await expect(claude.getByRole("meter").nth(0)).toHaveAttribute("aria-valuenow", "42")
+  const codex = section.locator('[data-quota-provider="codex"]')
+  await expect(codex).toContainText("experimental")
+  await expect(codex).toContainText("primary (5-hour)")
+  await expect(codex).toContainText(/resets in (44|45|46)m/)
+  quota = "states"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator('[data-quota-provider="claude"] [data-quota-status]')).toContainText("Stale since")
+  await expect(section.locator('[data-quota-provider="claude"] .usage-quota-bar.stale')).toContainText("88% used")
+  await expect(section.locator('[data-quota-provider="claude"]')).not.toContainText("resets in")
+  await expect(section.locator('[data-quota-provider="codex"]')).toContainText("Not configured")
+  await expect(section.locator('[data-quota-provider="codex"] .usage-quota-bar')).toHaveCount(0)
+  await expect(section.locator('[data-quota-provider="codex"]')).not.toContainText("0%")
+  quota = "malformed"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator('[data-quota-provider="claude"]')).toContainText("Unavailable (invalid)")
+  await expect(section.locator(".usage-quota-bar")).toHaveCount(0)
+  quota = "ok"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator(".usage-quota-bar")).toHaveCount(3)
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "quota: no horizontal overflow at 390px RTL").toBe(true)
+  await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
+  await page.setViewportSize({ width: 1280, height: 860 })
+  console.log("PASS usage quota: hidden without the route; ok bars + countdown; experimental Codex; stale, not configured, unavailable never 0; 390px RTL")
+
   mode = "html"
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(page.locator(".usage-page")).toContainText("Usage is not available on")
   await expect(total).toHaveCount(0)
   console.log("PASS usage: an older Core (HTML for the route) reads as unavailable, not $0")
   expect(errors).toEqual([])
+} catch (error) {
+  console.error(error)
+  process.exitCode = 1
 } finally {
   await browser.close()
   await preview.close()

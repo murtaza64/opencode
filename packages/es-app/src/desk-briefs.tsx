@@ -15,6 +15,7 @@ const waitFor = (ready: () => boolean) => new Promise<void>(resolve => {
   check()
 })
 const SETTING = "es-app:front-desk:auto-prepare"
+const BRIEF_V1_SETTING = "es-app:brief-v1"
 // The newest few open items first, then the backlog one at a time: no burst on first run.
 const FIRST = 5
 const MAX_RUNNING = 2
@@ -24,6 +25,8 @@ const create = () => {
   // Automation-driven browsers (tests, agents) default to off so they never start model work unasked,
   // and so does a remote host: its model work starts only when chosen there. Off until the host is known.
   const [auto, setAutoRaw] = createSignal(localStorage.getItem(SETTING) === "on")
+  const [briefV1, setBriefV1Raw] = createSignal(localStorage.getItem(BRIEF_V1_SETTING) === "on")
+  const setBriefV1 = (value: boolean) => { localStorage.setItem(BRIEF_V1_SETTING, value ? "on" : "off"); setBriefV1Raw(value) }
   if (localStorage.getItem(SETTING) === null && !navigator.webdriver) void readHost().then(value => { if (localStorage.getItem(SETTING) === null) setAutoRaw(!value.remote) })
   const setAuto = (value: boolean) => {
     localStorage.setItem(SETTING, value ? "on" : "off")
@@ -80,7 +83,7 @@ const create = () => {
     void briefs.start(next)
   })
   return {
-    auto, setAuto, attention, items, anchor, jobFor, track, unavailable,
+    auto, setAuto, briefV1, setBriefV1, attention, items, anchor, jobFor, track, unavailable,
     /** Starts reading the shared parent (briefs and background tasks) without starting any job. */
     activate: () => setManual(true), waitReady: () => waitFor(anchor.ready),
     view: () => { setViewers(count => count + 1); onCleanup(() => setViewers(count => count - 1)) },

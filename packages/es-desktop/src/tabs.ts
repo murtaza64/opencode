@@ -5,7 +5,11 @@
  * covered. Each view has its own session partition and origin, so drafts, cookies and requests
  * never cross hosts, and a view keeps its page while another host is shown. The strip has no
  * scripts or privileges; selecting a tab is a navigation the main process intercepts. */
+import { testInstance } from "./test-instance"
 import { Menu, session, WebContentsView, type BaseWindow, type Session, type WebContents } from "electron"
+import type { Unavailable } from "./badges"
+
+const REASON: Record<Unavailable, string> = { "signed-out": "signed out", unreachable: "unreachable", error: "error" }
 
 export type HostTab = {
   id: string
@@ -31,6 +35,8 @@ export const TITLE_BAR_HEIGHT = 44
 const CONTROLS_INSET = process.platform === "darwin" ? 78 : 8
 const TAB_URL = "https://editspace-tab.invalid/"
 const MENU = "__hosts"
+// Isolated world for focus housekeeping only, apart from the page guard's preload world.
+const UNFOCUS_WORLD = 1201
 // Below this window width the segment collapses to the current host plus a host menu.
 const NARROW = 900
 
@@ -44,6 +50,12 @@ export const createTabs = (
   const views = new Map<string, WebContentsView>()
   const state = { selected: tabs[0].id, painted: "", queued: false }
   const badges = new Map<string, Badge>()
+  const reasons = new Map<string, Unavailable>()
+  // "Needs you unavailable", with why when one host says so (signed out / unreachable / error).
+  const unavailableLabel = (ids: string[]) => {
+    const why = [...new Set(ids.flatMap((id) => badges.get(id) === "unavailable" ? [REASON[reasons.get(id) ?? "error"]] : []))]
+    return `Needs you unavailable${why.length ? `: ${why.join(", ")}` : ""}`
+  }
   const css = new Map<string, { key: string; width: number }>()
   const barSession = session.fromPartition("editspace-tab-bar")
   barSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith("data:") }))
@@ -58,13 +70,33 @@ export const createTabs = (
     select(id)
   })
   bar.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  // Covers the shown host's view until its first document is ready (a launch, restore or first open), so a host whose
+  // document is slow (an app listener's readiness wait, a page host's cold load) reads "Loading <host>" instead of a
+  // plain dark view. No script, data: only.
+  const cover = new WebContentsView({ webPreferences: { ...preferences(barSession), javascript: false } })
+  cover.setBackgroundColor("#111113")
+  cover.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  cover.webContents.on("will-navigate", (event) => event.preventDefault())
+  cover.setVisible(false)
+  window.contentView.addChildView(cover)
   window.contentView.addChildView(bar)
+  // Hosts whose first document is not ready yet.
+  const loading = new Set<string>()
+  const covered = { label: "" }
+  const recover = () => {
+    const tab = current()
+    const shown = loading.has(tab.id)
+    cover.setVisible(shown)
+    if (!shown || covered.label === tab.label || cover.webContents.isDestroyed()) return
+    covered.label = tab.label
+    void cover.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingPage(tab.label))}`)
+  }
   const current = () => tabs.find((tab) => tab.id === state.selected) ?? tabs[0]
   const narrow = () => window.getContentBounds().width < NARROW
   const describe = (id: string) => {
     const badge = badges.get(id)
     if (id === state.selected || !badge) return ""
-    if (badge === "unavailable") return " · Needs you unavailable"
+    if (badge === "unavailable") return ` · ${unavailableLabel([id])}`
     return badge.count || badge.partial ? ` · ${badge.count}${badge.partial ? "+" : ""} need you` : ""
   }
   // Strip tabs: hosts without a containing tab, plus the shown host so the strip always names it.
@@ -89,8 +121,8 @@ export const createTabs = (
   // The strip's width over an app host: the window controls plus each tab. Labels are short host
   // names in the system font; the estimate leaves slack rather than clipping.
   const stripWidth = () => narrow()
-    ? CONTROLS_INSET + 8 + 20 + Math.min(150, Math.ceil(current().label.length * 7.4)) + 16 + (summary() ? 24 : 0)
-    : CONTROLS_INSET + 8 + strip().reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
+    ? CONTROLS_INSET + 8 + (testInstance() ? 20 + Math.min(220, Math.ceil(testInstance()!.label.length * 7)) : 0) + 20 + Math.min(150, Math.ceil(current().label.length * 7.4)) + 16 + (summary() ? 24 : 0)
+    : CONTROLS_INSET + 8 + (testInstance() ? 20 + Math.min(220, Math.ceil(testInstance()!.label.length * 7)) : 0) + strip().reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
   // The app's header starts after the strip, in the same row, keeping its own drag area.
   const inset = async (tab: HostTab, contents: WebContents) => {
     if (tab.kind !== "app" || contents.isLoading()) return
@@ -111,6 +143,7 @@ export const createTabs = (
     const bounds = window.getContentBounds()
     const page = current().kind === "page"
     bar.setBounds({ x: 0, y: 0, width: page ? bounds.width : Math.min(stripWidth(), bounds.width), height: TITLE_BAR_HEIGHT })
+    cover.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
     views.forEach((view, id) => {
       const tab = tabs.find((item) => item.id === id)!
       const top = tab.kind === "page" ? TITLE_BAR_HEIGHT : 0
@@ -119,6 +152,11 @@ export const createTabs = (
     })
   }
   // Views load on first selection, so an unopened host's page never runs in the background.
+  const active = () => window.isVisible() && window.isFocused()
+  // Blurs the view's focused element from an isolated world, so a page's own scripts neither see nor block it.
+  const unfocus = (contents: WebContents) => {
+    if (!contents.isDestroyed()) void contents.executeJavaScriptInIsolatedWorld(UNFOCUS_WORLD, [{ code: "document.activeElement instanceof HTMLElement && document.activeElement.blur()" }]).catch(() => undefined)
+  }
   const view = (id: string, url?: string) => {
     const existing = views.get(id)
     if (existing) return existing
@@ -131,10 +169,23 @@ export const createTabs = (
     created.webContents.on("did-finish-load", () => {
       css.delete(tab.id)
       void inset(tab, created.webContents)
+      // A page that loads while this window is not shown and focused (a restore at a hidden launch) keeps no
+      // autofocused field: a focused password field can hold macOS Secure Input (defensive; DD #645/#651).
+      if (tab.kind === "page" && !active()) unfocus(created.webContents)
     })
+    // The first document only: a later reload keeps showing the page it replaces.
+    loading.add(id)
+    const ready = () => {
+      if (!loading.delete(id)) return
+      if (id === state.selected) recover()
+    }
+    created.webContents.once("dom-ready", ready)
+    created.webContents.once("did-fail-load", ready)
+    created.webContents.once("render-process-gone", ready)
     views.set(id, created)
     window.contentView.addChildView(created)
-    // Keep the strip above every host view.
+    // Keep the loading cover and then the strip above every host view.
+    window.contentView.addChildView(cover)
     window.contentView.addChildView(bar)
     layout()
     void created.webContents.loadURL(url ?? tab.url)
@@ -159,8 +210,9 @@ export const createTabs = (
   }
   const paint = () => {
     const html = narrow()
-      ? collapsedHTML(current(), current().kind === "page", summary())
-      : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge)
+      ? collapsedHTML(current(), current().kind === "page", summary(), unavailableLabel(tabs.filter((tab) => tab.id !== state.selected).map((tab) => tab.id)))
+      : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge,
+        (id) => unavailableLabel(tabs.filter((tab) => (tab.id === id || tab.within === id) && tab.id !== state.selected).map((tab) => tab.id)))
     if (html === state.painted) return
     state.painted = html
     // Load on a later task, coalesced to the latest strip: a selection can run inside another
@@ -175,12 +227,17 @@ export const createTabs = (
   }
   const select = (id: string) => {
     if (!tabs.some((item) => item.id === id)) return
+    const hidden = views.get(state.selected)
     state.selected = id
     const shown = view(id)
+    // The tab being hidden gives up its focused field first: hiding a view does not blur it, and a focused password
+    // field in a hidden view can keep macOS Secure Input on (defensive; causality unproven, DD #645/#651).
+    if (hidden && hidden !== shown) unfocus(hidden.webContents)
     views.forEach((item) => item.setVisible(item === shown))
     layout()
+    recover()
     paint()
-    shown.webContents.focus()
+    if (active()) shown.webContents.focus()
   }
   window.on("resize", () => {
     layout()
@@ -191,6 +248,13 @@ export const createTabs = (
     selected: () => state.selected,
     // Re-applies geometry after the shown view's zoom changed.
     refresh: () => layout(),
+    /** Re-lays out and repaints the shown view and the strip (no reload): after a wake or a display change a live
+     * renderer can be left with nothing painted. */
+    repaint: () => {
+      layout()
+      view(state.selected).webContents.invalidate()
+      bar.webContents.invalidate()
+    },
     shownContents: () => view(state.selected).webContents,
     hosts: () => tabs.map((tab) => ({ id: tab.id, label: tab.label, badge: badges.get(tab.id) })),
     contents: (id: string) => view(id).webContents,
@@ -201,12 +265,19 @@ export const createTabs = (
       else view(id, url)
     },
     sessions: () => [...new Set(tabs.map((tab) => tab.session))],
-    setBadge: (id: string, badge: Badge) => {
+    setBadge: (id: string, badge: Badge, reason?: Unavailable) => {
       badges.set(id, badge)
+      if (reason) reasons.set(id, reason)
+      else reasons.delete(id)
       paint()
       layout()
     },
   }
+}
+
+const testMark = () => {
+  const test = testInstance()
+  return test ? `<span class="test-instance" role="status" title="${escape(`Test instance on a separate profile: ${test.profile}. Not your normal Editspace; its pins, drafts and desk history are its own.`)}">${escape(test.label)}</span>` : ""
 }
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
@@ -221,23 +292,28 @@ a:focus-visible{outline:2px solid #b4befe;outline-offset:-2px}
 a[aria-current=page]{color:#cdd6f4;background:#26262b}
 b{min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#fab387;color:#040405;font-size:10px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
 b.unknown{background:transparent;border:1px dashed #6c7086;min-width:12px;width:12px;height:12px;padding:0}
+.test-instance{margin-right:6px;padding:2px 7px;border-radius:5px;background:#f38ba8;color:#040405;font-size:11px;letter-spacing:.04em;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 </style>`
 
-const collapsedHTML = (tab: HostTab, full: boolean, summary: string) => {
+const collapsedHTML = (tab: HostTab, full: boolean, summary: string, unavailable: string) => {
   const unknown = summary === " "
-  const label = unknown ? "Other hosts: Needs you unavailable" : summary ? `Other hosts: ${summary} need you` : ""
+  const label = unknown ? `Other hosts: ${unavailable}` : summary ? `Other hosts: ${summary} need you` : ""
   const mark = summary ? `<b${unknown ? ' class="unknown"' : ""} aria-label="${label}">${unknown ? "" : summary}</b>` : ""
-  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts"><a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${testMark()}<a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
 }
 
-const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined) =>
-  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${tabs
+const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined, unavailable: (id: string) => string) =>
+  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${testMark()}${tabs
     .map((tab) => {
       const text = badge(tab.id)
       const value = shown(tab.id)
-      const label = value === "unavailable" ? "Needs you unavailable" : `${text.trim()} need${text === "1" ? "s" : ""} you`
+      const label = value === "unavailable" ? unavailable(tab.id) : `${text.trim()} need${text === "1" ? "s" : ""} you`
       const mark = text ? `<b${value === "unavailable" ? ' class="unknown"' : ""} aria-label="${label}">${value === "unavailable" ? "" : text}</b>` : ""
       const tip = escape(text ? `${tab.label} · ${label}` : tab.label)
       return `<a href="${TAB_URL}${encodeURIComponent(tab.id)}" title="${tip}"${tab.id === selected ? ' aria-current="page"' : ""}><bdi dir="auto">${escape(tab.label)}</bdi>${mark}</a>`
     })
     .join("")}</nav></html>`
+
+// The loading cover's page: the host's name only, centred below the strip, in the app's dark tone.
+const loadingPage = (label: string) =>
+  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Loading</title><style>html,body{margin:0;height:100%;background:#111113;color:#8a8f98;font:500 14px system-ui;-webkit-user-select:none;user-select:none}main{display:grid;place-items:center;height:calc(100% - ${TITLE_BAR_HEIGHT}px);margin-top:${TITLE_BAR_HEIGHT}px}</style><main><p id="loading">Loading <bdi dir="auto">${escape(label)}</bdi>…</p></main></html>`

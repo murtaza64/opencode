@@ -73,7 +73,7 @@ try {
   const postsBefore = posts().length
   // Queue is a secondary action behind the send menu.
   await page.getByRole("button", { name: "More send options", exact: true }).click()
-  await page.getByRole("button", { name: "Queue", exact: true }).click()
+  await page.getByRole("button", { name: "Queue for when idle", exact: true }).click()
   await expect.poll(() => posts().length).toBe(postsBefore + 1)
   const requestID = posts().at(-1).body.requestID
   expect(fixture.receipts.some((item) => item.requestID === requestID && item.state === "pending")).toBe(true)

@@ -13,6 +13,7 @@ import type { MessageID, PartID, SessionV1 } from "../v1/session"
 import { WorkspaceV2 } from "../workspace"
 import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
+import type { SessionLastMessage } from "./last-message"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
 
@@ -63,6 +64,8 @@ export const SessionTable = sqliteTable(
     time_archived: integer(),
     time_turn_started: integer(),
     time_turn_ended: integer(),
+    /** Projected latest visible message for session lists; null is unknown. See SessionLastMessage. */
+    last_message: text({ mode: "json" }).$type<SessionLastMessage.Stored>(),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),

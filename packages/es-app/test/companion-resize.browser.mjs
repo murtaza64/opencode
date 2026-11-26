@@ -68,7 +68,7 @@ try {
   for (const dir of ["ltr", "rtl"]) await check(`resize ${dir}`, { dir }, async page => {
     await page.locator('[data-nav="front-desk"]').click()
     await expect(page.locator(companion)).not.toHaveClass(/closed/)
-    const handle = page.getByRole("separator", { name: "Resize Front desk chat" })
+    const handle = page.getByRole("separator", { name: "Resize Porter" })
     // The handle has no layout width (it sits on the seam); it exists and takes focus.
     await expect(handle).toHaveCount(1)
     const start = await width(page, companion)

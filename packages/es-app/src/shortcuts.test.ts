@@ -4,7 +4,7 @@ import { ariaShortcut, matchShortcut, pinnedSlot, SEQUENCES, sequenceLabel, SHOR
 test.each([
   ["primaryAction", "⌘↵", "Ctrl+Enter"],
   ["submit", "⌘↵", "Ctrl+Enter"],
-  ["cycleTarget", "⌘M", "Ctrl+M"],
+  ["moreSendOptions", "⌘M", "Ctrl+M"],
   ["find", "⌘F", "Ctrl+F"],
   ["previousPrompt", "⌃P", "Ctrl+P"],
   ["nextPrompt", "⌃N", "Ctrl+N"],
@@ -24,6 +24,9 @@ test.each([
   ["mruForward", "⌃⇧Tab", "Ctrl+Shift+Tab"],
   ["focusLeft", "⌃⌥H", "Ctrl+Alt+H"],
   ["previousRegion", "⇧F6", "Shift+F6"],
+  ["help", "⌘?", "Alt+?"],
+  ["helpF1", "F1", "F1"],
+  ["porter", "⌘/", "Alt+/"],
 ] as const)("labels approved app chord %s with Cmd on macOS and Alt elsewhere", (id, mac, other) => {
   expect(shortcutLabel(id, "mac")).toBe(mac)
   expect(shortcutLabel(id, "other")).toBe(other)
@@ -35,7 +38,7 @@ test("lists both chords when the handler accepts Cmd or Ctrl", () => {
 })
 
 test("lists only the literal chord for single-modifier handlers", () => {
-  expect(ariaShortcut("cycleTarget", "mac")).toBe("Meta+M")
+  expect(ariaShortcut("moreSendOptions", "mac")).toBe("Meta+M")
   expect(ariaShortcut("previousPrompt")).toBe("Control+P")
   expect(ariaShortcut("expandEditor")).toBe("Control+E")
 })
@@ -108,9 +111,17 @@ test("no sequence is a prefix of another", () => {
 })
 
 test("D4: off macOS cycle target accepts Ctrl+M and still Super+M", () => {
-  expect(ariaShortcut("cycleTarget", "other")).toBe("Control+M Meta+M")
-  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "cycleTarget", "other")).toBe(true)
-  expect(matchShortcut(key({ key: "m", code: "KeyM", metaKey: true }), "cycleTarget", "other")).toBe(true)
-  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "cycleTarget", "mac")).toBe(false)
+  expect(ariaShortcut("moreSendOptions", "other")).toBe("Control+M Meta+M")
+  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "moreSendOptions", "other")).toBe(true)
+  expect(matchShortcut(key({ key: "m", code: "KeyM", metaKey: true }), "moreSendOptions", "other")).toBe(true)
+  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "moreSendOptions", "mac")).toBe(false)
 })
 
+
+test("the help chord and Porter share the slash key, told apart by Shift", () => {
+  const slash = (shiftKey: boolean) => key({ key: shiftKey ? "?" : "/", code: "Slash", metaKey: true, shiftKey })
+  expect(matchShortcut(slash(true), "help", "mac")).toBe(true)
+  expect(matchShortcut(slash(true), "porter", "mac")).toBe(false)
+  expect(matchShortcut(slash(false), "porter", "mac")).toBe(true)
+  expect(matchShortcut(slash(false), "help", "mac")).toBe(false)
+})

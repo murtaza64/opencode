@@ -69,7 +69,7 @@ const settled = async (read) => {
   }
 }
 try {
-  const bar = await page((url) => url.startsWith("data:text/html"))
+  const bar = await page((url) => url.startsWith("data:text/html") && url.includes("%3Cnav"))
   // The strip repaints (a data: navigation) when the first host summaries arrive.
   await new Promise((resolve) => setTimeout(resolve, 3000))
   const local = await page((url) => /^http:\/\/127\.0\.0\.1:\d+\/$/.test(url))

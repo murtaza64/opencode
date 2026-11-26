@@ -5,10 +5,10 @@
  * user message after the send boundary (synthetic context parts excluded). */
 export const pendingEcho = (
   submission: { text: string; status: string; after?: string; messageID?: string } | null | undefined,
-  messages: readonly { id: string; role: string; text?: string }[],
+  messages: readonly { id: string; role: string; text?: string; contentReady?: boolean }[],
 ): boolean => {
   if (!submission) return false
-  if (submission.messageID) return !messages.some((message) => message.id === submission.messageID)
+  if (submission.messageID) return !messages.some((message) => message.id === submission.messageID && message.contentReady !== false)
   return !messages.some((message) =>
     message.role === "user" && message.id > (submission.after ?? "") && message.text === submission.text,
   )

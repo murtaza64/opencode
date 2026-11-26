@@ -8,7 +8,7 @@ import { ago, sessionHref, useDashboard } from "../state"
 import type { createAttention, AttentionRecord } from "../attention"
 import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
-import { AttentionSeries } from "../components/attention-series"
+import { Grilling } from "../components/grilling"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import type { IgnoredFailure } from "../failure-ignores"
@@ -26,8 +26,11 @@ import { oc } from "../api"
 import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
+import { ArchivePanel } from "../components/desk-archive"
 import { parseWorkKey, workQueue, workSurfaces, type WorkEntry } from "../work-queue"
-import { WorkRemoteDetail } from "../components/work-remote"
+import { host, readHost } from "../host"
+import { localWorkKey, remoteGap } from "../surface-ref"
+import { LinkedDecisions, WorkRemoteDetail } from "../components/work-remote"
 import { SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
 import "./home.css"
@@ -37,6 +40,8 @@ const MEMORY_ABSORB_DELAY_MS = 1500
 import "./desk.css"
 // Brief rules come after the desk's, as they did inside desk.css.
 import "./brief.css"
+import { DESK } from "../desk-identity"
+import { markAncestor } from "../dom-marks"
 
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "preparing", ready: "ready", failed: "failed", unknown: "stopped" })[job.state.state]
@@ -120,15 +125,31 @@ export default function Desk() {
   // Another Work host's entry (`<host>~<key>`): its detail opens here, acted on through that host (work-remote.tsx).
   const remoteEntries = createMemo(() => [...workQueue([], dashboard.work.feeds()).entries, ...workSurfaces([], dashboard.work.feeds()).entries])
   const lastRemote = new Map<string, WorkEntry>()
+  // A ref naming this host (`<own>~surface:x`, as `es surface publish` cites it) opens as this host's own item.
+  onMount(() => void readHost())
+  const resolvedKey = createMemo(() => { const key = selectedKey(); return key && localWorkKey(key, host()?.id) })
+  // The revision a cite link pinned (`&rev=N`); the reader says so when the host serves another one.
+  const cited = () => typeof params.rev === "string" && /^[1-9][0-9]{0,8}$/.test(params.rev) ? Number(params.rev) : undefined
   const selectedRemote = createMemo(() => {
-    const key = selectedKey()
+    const key = resolvedKey()
     if (!key || !parseWorkKey(key).host) return
     const entry = remoteEntries().find(candidate => candidate.key === key)
     if (entry) lastRemote.set(key, entry)
     return entry ?? lastRemote.get(key)
   })
+  // Another host's Surface ref with no entry in that host's list: say why, never show another copy.
+  const remoteSurfaceGap = createMemo(() => {
+    const key = resolvedKey()
+    const parts = key ? parseWorkKey(key) : undefined
+    if (!parts?.host || !parts.key.startsWith("surface:") || selectedRemote()) return
+    const feed = dashboard.work.feeds().find(item => item.host.id === parts.host)
+    const state = feed?.state()
+    const id = parts.key.slice("surface:".length)
+    return remoteGap({ host: parts.host, label: feed?.host.label, known: !!feed, current: !!state && state.status === "ready" && !state.surfacesStale,
+      withdrawn: state?.withdrawn?.find(item => item.id === id) })
+  })
   const selected = createMemo((): { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
-    const key = selectedKey()
+    const key = resolvedKey()
     if (!key || parseWorkKey(key).host) return
     const surface = surfaceFromKey(key)
     if (surface) return { surface }
@@ -146,7 +167,7 @@ export default function Desk() {
   const select = (key?: string) => {
     setSelectedKey(key)
     const surface = surfaceFromKey(key)
-    setParams({ surface, item: surface ? undefined : key }, { replace: true })
+    setParams({ surface, item: surface ? undefined : key, rev: undefined }, { replace: true })
   }
   const [evidence, setEvidence] = createSignal<HTMLElement>()
   // A brief sits below its request and may be off screen, already selected or stacked below the
@@ -201,7 +222,7 @@ export default function Desk() {
     surface: (() => { const id = selectedSurface(); const surface = surfaces.list().find(item => item.id === id); return surface && { id: surface.id, title: surface.title, owner: surface.owner } })(),
     cases: caseLines(chat.cases()),
   })
-  const context = () => desk.context(contextInput())
+  const context = (send = { input: false }) => desk.context(contextInput(), send)
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
   const askDetail = async (item: DeskItem, question: string) => {
@@ -212,7 +233,7 @@ export default function Desk() {
     const note = context()
     const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
     if (error) return error
-    if (note.length) desk.sent(note, true)
+    if (note.length) desk.sent(note, true, { input: false })
     chat.setOpen(true)
   }
 
@@ -221,7 +242,7 @@ export default function Desk() {
   if (params.view === "agents") return <Navigate href="/agents" />
   const refresh = () => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }
   // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
-  return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
+  return <main class="desk" classList={{ "desk-has-selection": !!selected() }} ref={(el) => markAncestor(() => el, ".content", "desk")}>
     <div class="desk-grid">
       {/* Status notices stay visible whatever is open: read-only answers, an unconfirmed answer to retry, brief or ignore trouble. */}
       {/* One page heading: shown above the overview, read-only for assistive tech while an item is open. */}
@@ -234,7 +255,8 @@ export default function Desk() {
       </div>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onOpen={surface => void surfaces.markSeen(surface)} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} withdrawn={surfaces.withdrawn().find(item => item.id === id)} checked={surfaces.checked()} cited={cited()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()}
+        decisions={<Show when={surfaces.list().find(item => item.id === id)}>{surface => <LinkedDecisions surface={surface()} />}</Show>} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
           <button class="desk-button" aria-label="Close" onClick={() => select()}>Close</button>
@@ -244,19 +266,23 @@ export default function Desk() {
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <Answered record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
           {/* Permission cards state their own verified status; other items only know they left the queue. */}
-          <Show when={!entry().live && entry().item.request?.kind !== "permission"}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
-          <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} now={now()} ignoring={!!entry().item.failure && ignores.busy(entry().item.failure!)} detail={question => askDetail(entry().item, question)}
+          <Show when={!entry().live && entry().item.request?.kind !== "permission" && !entry().item.series}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
+          <Canonical item={entry().item} live={entry().live} attention={attention} onClose={() => select()} requests={requests} now={now()} ignoring={!!entry().item.failure && ignores.busy(entry().item.failure!)} detail={question => askDetail(entry().item, question)}
             onIgnore={failure => void ignores.ignore(failure, failureLabel(failure)).then(() => { if (ignores.ignored(failure)) select() })} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
-          <Show when={receipts().length}><ul class="home-receipts" aria-label="Replies from the Front desk"><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · not confirmed" : receipt.result === "not-applied" ? " · no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
+          <Show when={receipts().length}><ul class="home-receipts" aria-label={`Replies from ${DESK.name}`}><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · not confirmed" : receipt.result === "not-applied" ? " · no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
           <Show when={!entry().item.record}><PreparedBrief item={entry().item} live={entry().live} /><MoreDetail ask={question => askDetail(entry().item, question)} /></Show>
         </>}</Show>
       </section>}</Show>}</Show>
 
       {/* Keyed by the entry key: list polls replace entry objects, and the detail (its answer draft, its host ledger) stays mounted. */}
-      <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} onClose={() => select()} />}</Show>
+      <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} cited={cited()} onClose={() => select()} />}</Show>
+      <Show when={remoteSurfaceGap()}>{gap => <section class="desk-evidence desk-surface" aria-label="Surface" data-surface-gap="ref">
+        <p class="desk-surface-state" role="status">{gap()}</p>
+        <button class="desk-button" onClick={() => select()}>Close</button>
+      </section>}</Show>
       {/* Nothing open: what is not already in the sidebar (Needs you and the Decisions and Surfaces tabs list the open
         * items): answers waiting on agents, history, ignored failures, memory and the desk's sources. */}
-      <Show when={!selected() && !selectedRemote() && !selectedSurface()}>
+      <Show when={!selected() && !selectedRemote() && !selectedSurface() && !remoteSurfaceGap()}>
         <section class="desk-overview" aria-label="Decisions and inbox">
           <p class="home-muted desk-overview-hint">Open something from Needs you or the Decisions tab; answered and older items are here.</p>
           <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
@@ -312,6 +338,7 @@ export default function Desk() {
               <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
             </div>
             <label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label>
+            <label class="desk-auto home-muted"><input type="checkbox" checked={prepared.briefV1()} onChange={event => prepared.setBriefV1(event.currentTarget.checked)} /> Decision brief v1</label>
           </section>
         </section>
       </Show>
@@ -349,7 +376,7 @@ const Answered = (props: { record: AttentionRecord; attention: ReturnType<typeof
       briefAfter={<PreparedBrief item={item()} live={false} part="after" pinned={job} />} briefDetails={<PreparedBrief item={item()} live={false} part="details" pinned={job} />} />}</Show>
 }
 
-const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
+const Canonical = (props: { item: DeskItem; live: boolean; onClose: () => void; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
   const dashboard = useDashboard()
   // With a complete brief for this exact revision, the brief leads and the producer's text folds away.
   const brief = useCompleteBrief(() => props.item)
@@ -365,7 +392,7 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
     <Show when={props.item.series} fallback={<Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
       briefJob={briefJob()} sends={sends()} copy={copy()} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
-      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><AttentionSeries item={props.item} attention={props.attention} /></Show>
+      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><Grilling item={props.item} attention={props.attention} onClose={props.onClose} /></Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={requestLive(props.live, request(), props.requests.rows(), dashboard.activity.requestState("permission", request().session, request().directory, request().id))}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}
@@ -413,7 +440,7 @@ const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
     if (await props.memory.write({ op: "upsert", id: entry.id, text: draft(), kind: entry.kind, scope: entry.scope, confidence: "stated" }, "human") === "written") setEditing()
   }
   const forget = async (id: string) => { if (await props.memory.write({ op: "forget", id }, "human") === "written") setForgotten(previous => [...previous, id]) }
-  return <section class="desk-memory" aria-label="Front desk memory">
+  return <section class="desk-memory" aria-label={`${DESK.name}'s memory`}>
     <Show when={props.memory.notice()}><p class="home-warning" role="status">{props.memory.notice()}</p></Show>
     <Show when={props.memory.uncertain()}><div class="desk-memory-actions"><button class="desk-button" disabled={props.memory.status() === "writing"} onClick={() => void props.memory.load()}>Reload memory</button><button class="desk-button" disabled={props.memory.status() === "writing"} onClick={() => void props.memory.resend()}>Resend identical change</button></div></Show>
     <ul class="desk-memory-list">
@@ -450,5 +477,6 @@ const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
         </li>}</For>
       </ol>
     </details>
+    <ArchivePanel />
   </section>
 }

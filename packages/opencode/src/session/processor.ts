@@ -2,7 +2,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Context, Schema, Scope, Semaphore } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
@@ -45,12 +45,19 @@ export interface Handle {
     },
   ) => Effect.Effect<void>
   readonly process: (streamInput: LLM.StreamInput, onModelInput?: Effect.Effect<void>) => Effect.Effect<Result>
+  /** The tree recorded at this step's last step-finish, for the loop's next step. */
+  readonly finished: () => string | undefined
 }
 
 type Input = {
   assistantMessage: SessionV1.Assistant
   sessionID: SessionID
   model: Provider.Model
+  /**
+   * The previous step's finish tree, passed only by the same run loop continuing straight from that step: nothing
+   * ran in between, so it is this step's starting tree. Never reused across turns (files may have changed since).
+   */
+  base?: string
 }
 
 export interface Interface {
@@ -68,6 +75,8 @@ interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
   snapshot: string | undefined
+  /** The tree recorded at the last step-finish; the next step starts from it instead of tracking again. */
+  finished: string | undefined
   blocked: boolean
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
@@ -94,11 +103,30 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
 
+    const scope = yield* Scope.Scope
+    // One background summary at a time per Session; an entry lives only while summaries for it are queued.
+    const summaryLocks = new Map<SessionID, { semaphore: Semaphore.Semaphore; users: number }>()
+    const withSummaryLock = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const entry = summaryLocks.get(sessionID) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+          entry.users++
+          summaryLocks.set(sessionID, entry)
+          return entry
+        }),
+        (entry) => entry.semaphore.withPermits(1)(effect),
+        (entry) =>
+          Effect.sync(() => {
+            entry.users--
+            if (entry.users === 0 && summaryLocks.get(sessionID) === entry) summaryLocks.delete(sessionID)
+          }),
+      )
+
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
-      const initialSnapshot = yield* snapshot.track()
+      const initialSnapshot = input.base ?? (yield* snapshot.track())
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -106,6 +134,7 @@ const layer = Layer.effect(
         toolcalls: {},
         shouldBreak: false,
         snapshot: initialSnapshot,
+        finished: undefined,
         blocked: false,
         needsCompaction: false,
         currentText: undefined,
@@ -421,7 +450,8 @@ const layer = Layer.effect(
             throw new Error(value.message)
 
           case "step-start":
-            if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
+            if (!ctx.snapshot) ctx.snapshot = ctx.finished ?? (yield* snapshot.track())
+            ctx.finished = undefined
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -468,7 +498,8 @@ const layer = Layer.effect(
             })
             yield* session.updateMessage(ctx.assistantMessage)
             if (ctx.snapshot) {
-              const patch = yield* snapshot.patch(ctx.snapshot)
+              // Tree to tree: the finish tree was just recorded, so the patch needs no second staging pass.
+              const patch = yield* snapshot.patch(ctx.snapshot, completedSnapshot)
               if (patch.files.length) {
                 yield* session.updatePart({
                   id: PartID.ascending(),
@@ -481,12 +512,18 @@ const layer = Layer.effect(
               }
               ctx.snapshot = undefined
             }
-            yield* summary
-              .summarize({
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.parentID,
-              })
-               .pipe(Effect.catchCause((cause) => Effect.logError("session summary failed", { sessionID: ctx.sessionID, cause })))
+            // AI SDK executes tools before finish-step, so this tree already includes this step's tool effects.
+            ctx.finished = completedSnapshot
+            // The turn summary is display data computed from recorded trees; it never gates the next provider call.
+            // One summary at a time per Session keeps their writes ordered.
+            yield* withSummaryLock(
+              ctx.sessionID,
+              summary.summarize({ sessionID: ctx.sessionID, messageID: ctx.assistantMessage.parentID }),
+            )
+              .pipe(
+                Effect.catchCause((cause) => Effect.logError("session summary failed", { sessionID: ctx.sessionID, cause })),
+                Effect.forkIn(scope),
+              )
             if (
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
@@ -717,6 +754,7 @@ const layer = Layer.effect(
         updateToolCall,
         completeToolCall,
         process,
+        finished: () => ctx.finished,
       } satisfies Handle
     })
 

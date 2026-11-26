@@ -1,0 +1,49 @@
+#!/usr/bin/env bun
+// A stand-in for `ssh` on PATH (contract work-hosts-and-pins §5b fixtures). It records its argv, then behaves as a
+// pinned-SSH forward to a Personal host: each `-L <socket>:127.0.0.1:<port>` becomes a unix socket served by a fixture
+// Core (FAKE_SSH_CORE_PORT) or dashboard (FAKE_SSH_DASHBOARD_PORT). Every request that reaches a socket is logged.
+// FAKE_SSH_MODE: "ok" (default), "hostkey" (host key mismatch), "refused" (host off the LAN), "work" (the dashboard
+// reports the Work profile).
+import { appendFileSync } from "node:fs"
+
+const log = (entry: unknown) => appendFileSync(process.env.FAKE_SSH_LOG!, JSON.stringify(entry) + "\n")
+const args = process.argv.slice(2)
+log({ argv: args, at: Date.now() })
+const mode = process.env.FAKE_SSH_MODE ?? "ok"
+if (mode === "hostkey") {
+  console.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.")
+  process.exit(255)
+}
+if (mode === "refused") {
+  console.error("ssh: connect to host ygnium.lan port 22: Connection refused")
+  process.exit(255)
+}
+
+const forwards = args.flatMap((arg, index) => (args[index - 1] === "-L" ? [arg] : [])).map((spec) => {
+  const match = /^(.+):127\.0\.0\.1:(\d+)$/.exec(spec)
+  if (!match) throw new Error(`unexpected forward ${spec}`)
+  return { socket: match[1]!, port: match[2]! }
+})
+const servers = forwards.map((forward) => {
+  const kind = forward.port === process.env.FAKE_SSH_CORE_PORT ? "core" : "dashboard"
+  return Bun.serve({
+    unix: forward.socket,
+    fetch: (request) => {
+      const url = new URL(request.url)
+      log({ socket: kind, method: request.method, path: url.pathname + url.search, headers: Object.fromEntries(request.headers) })
+      if (kind === "dashboard" && url.pathname === "/api/pins")
+        return Response.json({ rev: 0, profile: mode === "work" ? "work" : "personal", pins: [], tombstones: [] })
+      if (url.pathname === "/global/event")
+        return new Response('data: {"type":"session.updated","host":"ygnium"}\n\n', { headers: { "content-type": "text/event-stream" } })
+      if (url.pathname === "/session/redirect") return new Response(null, { status: 302, headers: { location: "http://elsewhere/" } })
+      return Response.json({ host: "ygnium", socket: kind, path: url.pathname }, { headers: { "set-cookie": "ygnium=secret; Path=/" } })
+    },
+  })
+})
+const stop = () => {
+  servers.forEach((server) => server.stop(true))
+  process.exit(0)
+}
+process.on("SIGTERM", stop)
+process.on("SIGINT", stop)
+setInterval(() => undefined, 1 << 30)

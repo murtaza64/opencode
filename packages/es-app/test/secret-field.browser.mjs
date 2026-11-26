@@ -57,18 +57,18 @@ try {
   {
     const values = canary()
     const { context, page, requests, card } = await open("secret")
-    await card.getByRole("radio", { name: "Provide key", exact: true }).check()
+    await card.getByRole("button", { name: "Provide key", exact: true }).click()
     const input = fields(card)
     await expect(input.issuer).toHaveAttribute("type", "password")
     await expect(input.secret).toHaveAttribute("type", "password")
     await expect(input.secret).toHaveAttribute("autocomplete", "off")
     // The note and the ordinary Send cannot carry it.
     await expect(card.getByRole("textbox", { name: /Note/ })).toHaveCount(0)
-    await expect(card.getByRole("button", { name: "Send Provide key" })).toBeDisabled()
-    await expect(card.getByRole("button", { name: "Submit securely" })).toBeDisabled()
+    await expect(card.getByRole("button", { name: /^Send/ })).toHaveCount(0)
+    await expect(card.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
     await input.issuer.fill(values.issuer)
     await input.secret.fill(values.secret)
-    await card.getByRole("button", { name: "Submit securely" }).dblclick()
+    await card.getByRole("button", { name: "Save", exact: true }).dblclick()
     // Success files the card as answered (the field unmounts); wait on the server side, then read History.
     await expect.poll(() => intake.calls.length, { timeout: 15_000 }).toBe(1)
     await expect(fields(card).secret).toHaveCount(0, { timeout: 15_000 })
@@ -80,8 +80,8 @@ try {
     const carriers = requests.filter(request => Object.values(values).some(value => request.url.includes(value) || request.body.includes(value)))
     if (carriers.length !== 1 || !carriers[0].url.includes("/es/api/secret-intake/")) throw Error(`canary left through ${carriers.map(item => item.url).join(", ")}`)
     if (preview.ledger.calls.some(call => JSON.stringify(call).includes(values.secret) || JSON.stringify(call).includes(values.issuer))) throw Error("canary reached the attention ledger")
+    // The item stays selected across the reload, so the answered card is on the item page (NAV-01/02): no History disclosure.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value")).toContainText("Handed to the approved program")
     const after = await traces(page)
     if (Object.values(values).some(value => after.includes(value))) throw Error("canary remained in storage, URL or page text")
@@ -91,10 +91,11 @@ try {
     // Option switch unmounts and clears; a hidden window clears.
     const values = canary()
     const { context, page, card } = await open("clears")
-    await card.getByRole("radio", { name: "Provide key", exact: true }).check()
+    await card.getByRole("button", { name: "Provide key", exact: true }).click()
     await fields(card).secret.fill(values.secret)
-    await card.getByRole("radio", { name: "Not now", exact: true }).check()
-    await card.getByRole("radio", { name: "Provide key", exact: true }).check()
+    // Esc folds the field (unmount clears it); reopening shows empty inputs.
+    await page.keyboard.press("Escape")
+    await card.getByRole("button", { name: "Provide key", exact: true }).click()
     await expect(fields(card).secret).toHaveValue("")
     await fields(card).issuer.fill(values.issuer)
     await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true }); document.dispatchEvent(new Event("visibilitychange")) })
@@ -106,13 +107,13 @@ try {
     intake.status = 409
     const before = intake.calls.length
     const { context, page, card } = await open("refused")
-    await card.getByRole("radio", { name: "Provide key", exact: true }).check()
+    await card.getByRole("button", { name: "Provide key", exact: true }).click()
     const values = canary()
     await fields(card).issuer.fill(values.issuer)
     await fields(card).secret.fill(values.secret)
-    await card.getByRole("button", { name: "Submit securely" }).click()
+    await card.getByRole("button", { name: "Save", exact: true }).click()
     await expect(card.locator("[data-secret-outcome]")).toContainText("already used")
-    await expect(card.getByRole("button", { name: "Submit securely" })).toBeDisabled()
+    await expect(card.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
     await expect(fields(card).secret).toHaveValue("")
     if (intake.calls.length !== before + 1) throw Error("refused submission was retried")
     if ((await traces(page)).includes(values.secret)) throw Error("refusal echoed the value")
@@ -122,7 +123,7 @@ try {
   {
     // A remote-host page never offers the field.
     const { context, card } = await open("remote", { remote: true })
-    await card.getByRole("radio", { name: "Provide key", exact: true }).check()
+    await card.getByRole("button", { name: "Provide key", exact: true }).click()
     await expect(card.locator("[data-secret-unavailable]")).toContainText("computer that asked")
     await expect(card.getByLabel("JWT secret")).toHaveCount(0)
     await context.close()

@@ -6,10 +6,11 @@ const receipt = (requestID: string, delivery: "steer" | "queue", admittedSeq: nu
   ({ requestID, delivery, text: requestID, agent: "build", sessionID: "ses_1", admittedSeq, timeCreated: admittedSeq, state: "pending", ...extra }) as InputReceipt
 const base = { hasContent: false, busy: true, keyboardTarget: "steer" as const, receipts: [] as InputReceipt[], interrupt: true, delivering: null, unsettled: false, nudging: false, nudge: true }
 
-test("a draft with content keeps Send while idle and the keyboard target while busy", () => {
+test("a draft with content sends while idle and steers while busy, whatever target was last chosen", () => {
   expect(primaryAction({ ...base, hasContent: true, busy: false })).toMatchObject({ kind: "send", action: "steer", label: "Send" })
+  // Queue and Aside are explicit menu choices (composer-steer-primary); a saved target never becomes the primary.
   expect(primaryAction({ ...base, hasContent: true, keyboardTarget: "queue", receipts: [receipt("in_1", "steer", 1)] }))
-    .toMatchObject({ kind: "send", action: "queue", label: "Queue" })
+    .toMatchObject({ kind: "send", action: "steer", label: "Steer" })
 })
 
 test("an empty draft with a confirmed pending steer interrupts and delivers the oldest one", () => {

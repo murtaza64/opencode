@@ -9,7 +9,7 @@
   overflow: hidden;
 }
 
-[data-component="split-button-v2"]:is(:hover, :has([data-component="split-button-v2-menu-trigger"][data-expanded])) {
+[data-component="split-button-v2"]:is(:hover, [data-menu-expanded]) {
   box-shadow: inset 0 0 0 1px var(--v2-border-border-muted);
 }
 

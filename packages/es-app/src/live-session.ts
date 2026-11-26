@@ -8,6 +8,7 @@ import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/s
 import { ocAt } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 import { anchorValid } from "./message-anchor"
+import { registerHydrator } from "./page-parts"
 import { perfSpan, perfTimed } from "./perf-telemetry"
 
 export const TAIL = 80
@@ -146,12 +147,15 @@ export function createLiveSession(
   // quietly and reconnects/retries wait until a view loads it again.
   let suspended = false
   let loadAbort: AbortController | undefined
+  let todoRevision = 0
   // A stream that opens after the transcript is shown only needs the newest messages re-read to
   // close the gap before it opened; older history is already held.
   let resyncNext = false
   const load = (): Promise<void> => {
     if (disposed) return Promise.resolve()
     suspended = false
+    // A store reused after suspend() has no stream: subscribe again; its open resyncs what was missed.
+    if (!source) subscribe()
     if (activeLoad) return activeLoad
     setLoading(true)
     const abort = new AbortController()
@@ -188,12 +192,15 @@ export function createLiveSession(
       if (disposed) return
       snapshotStarted = true
       const snapshot = perfSpan("session.snapshot", { sessionID, warm: loaded() })
-      const [session, page, status, todos] = await Promise.all([
+      // Todos must not hold transcript readiness or replace a newer live update.
+      const revision = ++todoRevision
+      void timed("todos", oc.todos(sessionID, directory, signal)).then((todos) => {
+        if (!disposed && !signal.aborted && revision === todoRevision) setData("todo", reconcile(todos))
+      }, () => {})
+      const [session, page, status] = await Promise.all([
         record,
         timed("messages", oc.messagesPage(sessionID, directory, resync ? RESYNC_TAIL : TAIL, undefined, signal)),
         timed("status", oc.status(directory, signal)),
-        // Todos are auxiliary: a failed read keeps the last list, never the transcript.
-        timed("todos", oc.todos(sessionID, directory, signal)).catch(() => undefined),
       ]).catch((failure: unknown) => {
         snapshot.end(signal.aborted ? "aborted" : "failed", { ...timings, error: errorText(failure).slice(0, 160) })
         throw failure
@@ -240,7 +247,6 @@ export function createLiveSession(
           ),
         )
         setOlderCursor(cursor)
-        if (todos) setData("todo", reconcile(todos))
         setData("part_text_accum_delta", reconcile({}))
         const bases = new Set<string>()
         uncertainParts.clear()
@@ -357,6 +363,9 @@ export function createLiveSession(
     loadAbort?.abort()
     clearTimeout(retryTimer)
     retryTimer = undefined
+    // A cached (unmounted) store holds no stream; the transcript it has stays and is reconciled on reuse (DD #922).
+    source?.close()
+    source = undefined
   }
 
   const refresh = () => {
@@ -386,6 +395,7 @@ export function createLiveSession(
       }
       case "todo.updated": {
         if (props.sessionID !== sessionID || !Array.isArray(props.todos)) break
+        todoRevision++
         setData("todo", reconcile(props.todos))
         break
       }
@@ -507,58 +517,78 @@ export function createLiveSession(
     })
   }
   let source: ServerEvents | undefined
-  try {
-    // Another Work host streams only its global events through the Local listener: keep this
-    // directory's and unwrap them to the instance event shape.
-    source = createServerEvents(host.id ? `${host.base}/global/event` : `${host.base}/event?directory=${encodeURIComponent(directory)}`, {
-      types: ["session.", "message.", "todo.", "permission.", "question."],
-    })
-    source.onopen = () => {
-      if (disposed) return
-      setConnection("stream", "")
-      // Only the first open can use the short resync: a reopen after a drop may have missed any
-      // number of messages, so it re-reads the full tail.
-      const firstOpen = !streamOpened
-      streamOpened = true
-      releaseInitial?.()
-      if (!activeLoad || snapshotStarted) {
-        resyncNext = firstOpen
-        refresh()
-      }
-    }
-    source.onerror = () => {
-      if (disposed) return
-      releaseInitial?.()
-      batch(() => {
-        setConnection("stream", "Session connection lost. Reconnecting...")
-        stopOnFailure()
+  // Subscribes this session's stream; Reconnect calls it again for a fresh subscription (a new upstream stream).
+  const subscribe = () => {
+    source?.close()
+    try {
+      // Another Work host streams only its global events through the Local listener: keep this
+      // directory's and unwrap them to the instance event shape.
+      source = createServerEvents(host.id ? `${host.base}/global/event` : `${host.base}/event?directory=${encodeURIComponent(directory)}`, {
+        types: ["session.", "message.", "todo.", "permission.", "question."],
       })
-    }
-    source.onmessage = (e) => {
-      if (disposed) return
-      try {
-        const event = host.id ? globalEvent(JSON.parse(e.data), directory) : JSON.parse(e.data)
-        if (event === null) return
-        if (!event || typeof event.type !== "string") throw new Error("Invalid session event")
-        setConnection("event", "")
-        apply(event)
-        void Promise.resolve(onEvent?.(event)).catch(eventFailure)
-      } catch (failure) {
-        eventFailure(failure)
+      source.onopen = () => {
+        if (disposed) return
+        setConnection("stream", "")
+        // Only the first open can use the short resync: a reopen after a drop may have missed any
+        // number of messages, so it re-reads the full tail.
+        const firstOpen = !streamOpened
+        streamOpened = true
+        releaseInitial?.()
+        // Joining a stream another view already holds opens at once, before this store's first load has started:
+        // that load reads the snapshot after this open anyway, so a refresh here would read it twice.
+        if (firstOpen && !activeLoad && !snapshotStarted) return
+        if (!activeLoad || snapshotStarted) {
+          resyncNext = firstOpen
+          refresh()
+        }
       }
+      source.onerror = () => {
+        if (disposed) return
+        releaseInitial?.()
+        batch(() => {
+          setConnection("stream", "Session connection lost. Reconnecting...")
+          stopOnFailure()
+        })
+      }
+      source.onmessage = (e) => {
+        if (disposed) return
+        try {
+          const event = host.id ? globalEvent(JSON.parse(e.data), directory) : JSON.parse(e.data)
+          if (event === null) return
+          if (!event || typeof event.type !== "string") throw new Error("Invalid session event")
+          setConnection("event", "")
+          apply(event)
+          void Promise.resolve(onEvent?.(event)).catch(eventFailure)
+        } catch (failure) {
+          eventFailure(failure)
+        }
+      }
+    } catch (failure) {
+      setConnection("stream", `Unable to connect to session: ${errorText(failure)}`)
+      stopOnFailure()
     }
-  } catch (failure) {
-    setConnection("stream", `Unable to connect to session: ${errorText(failure)}`)
-    stopOnFailure()
   }
+  subscribe()
+  const unregister = registerHydrator(sessionID, async (messageID, partID) => {
+    const part = await oc.part(sessionID, directory, messageID, partID, controller.signal)
+    // Replaces the shortened copy exactly as a live part update would; a newer live update has already done so.
+    if (part && !disposed) apply({ type: "message.part.updated", properties: { sessionID, part } })
+  })
   onCleanup(() => {
     disposed = true
+    unregister()
     controller.abort()
     clearTimeout(retryTimer)
     source?.close()
   })
 
-  return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry }
+  return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry,
+    /** A fresh stream subscription and a snapshot reload; nothing is resent. */
+    reconnect: () => {
+      if (disposed) return
+      subscribe()
+      return load()
+    } }
 }
 
 /** A global stream event as an instance event of `directory`; null for another directory's. */

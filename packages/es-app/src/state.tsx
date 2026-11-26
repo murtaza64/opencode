@@ -1,5 +1,6 @@
 /* Shared dashboard state: one fetch of /es/api/state for the sidebar, board,
  * and session info panel, refreshed on the dashboard's SSE ticks. */
+import { pageHidden } from "./page-visible"
 import {
   createContext,
   createEffect,
@@ -22,14 +23,14 @@ import { resolveProjectName } from "./project-name"
 import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createPinsClient, syncableHost, type PinsClient } from "./pins-sync"
-import { isRowPinned, legacyPinsCovered, migrateReadyPins, movePinnedRow, orderingPinsClient, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
+import { isRowPinned, legacyPinsCovered, migrateReadyPins, movePinnedRow, orderingPinsClient, pinPeerHosts, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
 import { background } from "./startup"
 import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
-import { readHost, workFeedHosts, type WorkHost } from "./host"
+import { aggregates, readHost, workFeedHosts, type WorkHost } from "./host"
 import { createHostFeed, type HostFeed, type HostedRow } from "./host-feed"
 import { forgetSeen, loadSeen, saveSeen } from "./last-seen"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
@@ -37,11 +38,13 @@ import type { Event } from "@opencode-ai/sdk/v2"
 
 /** How often other editspaces' handoff lineage (used for cross-project pins) is re-read. */
 const OTHER_LINEAGE_MS = 60_000
+const LANE_FOLLOW_MS = 30_000
+const LANE_FOLLOW_GAP_MS = 3_000
 const INDEX_MIN_GAP_MS = 120_000
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
-export type DotState = "pending" | "busy" | "failed" | "unread" | "idle"
+export type DotState = "pending" | "busy" | "failed" | "unread" | "idle" | "unknown"
 
 export type SessionRow = {
   id: string
@@ -249,9 +252,11 @@ export function DashboardProvider(props: ParentProps) {
   const [migratedHosts, setMigratedHosts] = createSignal<string[]>([])
   const migratingHosts = new Set<string>()
   const localClient = () => pinClients()[ownPinHost() ?? ""]
+  // A read-only peer has nothing of this device's to import, so its store is the view as soon as it is read.
+  const synced = (host: string) => migratedHosts().includes(host) || !!pinClients()[host]?.readOnly
   const usableClient = (host: string) => {
     const client = pinClients()[host]
-    return client?.state().status === "ready" && migratedHosts().includes(host) ? client : undefined
+    return client?.state().status === "ready" && synced(host) ? client : undefined
   }
   // One pass over the session index per index change, not per caller per event.
   const sessionIndex = createMemo(() => {
@@ -355,9 +360,9 @@ export function DashboardProvider(props: ParentProps) {
   })
   const notificationSource = createServerEvents("/es/api/notification-events")
   notificationSource.onmessage = () => refetchNotifications()
+  // The stream pushes every change; a (re)open resyncs whatever was missed while it was down or the page hidden. No poll.
+  notificationSource.onopen = () => refetchNotifications()
   onCleanup(() => notificationSource.close())
-  const notificationInterval = setInterval(refetchNotifications, 30_000)
-  onCleanup(() => clearInterval(notificationInterval))
   const interval = setInterval(refetch, 60_000)
   onCleanup(() => clearInterval(interval))
 
@@ -511,8 +516,24 @@ export function DashboardProvider(props: ParentProps) {
   // re-reading them on every local state refresh only multiplied requests: each dashboard event
   // cost one state + one handoffs GET per other editspace. They refresh on their own slow clock.
   const [otherTick, setOtherTick] = createSignal(0)
-  const otherInterval = setInterval(() => setOtherTick((value) => value + 1), OTHER_LINEAGE_MS)
+  const otherInterval = setInterval(() => { if (!pageHidden()) setOtherTick((value) => value + 1) }, OTHER_LINEAGE_MS)
   onCleanup(() => clearInterval(otherInterval))
+  // A new session in another editspace with a pinned lane may be that lane's handoff successor, stamped owner just after
+  // it appears: re-read those lineages every few seconds for a short window, so the lane pin follows it promptly.
+  let listedIds: Set<string> | undefined
+  let followUntil = 0
+  createEffect(() => {
+    const rows = globalSessions()
+    if (!rows) return
+    const fresh = listedIds ? rows.filter((row) => !listedIds!.has(row.id)) : []
+    listedIds = new Set(rows.map((row) => row.id))
+    const selected = currentEditspaceName()
+    const pinned = new Set((untrack(localClient)?.state().pins ?? []).flatMap((pin) => /^lane:([^/]+)\//.exec(pin.ref)?.[1] ?? []).filter((name) => name !== selected))
+    const roots = (untrack(editspaces)?.editspaces ?? []).filter((item) => pinned.has(item.name)).map((item) => item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, ""))
+    if (fresh.some((row) => roots.some((root) => row.directory === root || row.directory.startsWith(`${root}/`)))) followUntil = Date.now() + LANE_FOLLOW_MS
+  })
+  const followInterval = setInterval(() => { if (Date.now() < followUntil) setOtherTick((value) => value + 1) }, LANE_FOLLOW_GAP_MS)
+  onCleanup(() => clearInterval(followInterval))
   const [otherLineages] = createResource(
     () => ({ names: (editspaces()?.editspaces.map((item) => item.name) ?? []).join("\n"), selected: currentEditspaceName(), tick: otherTick() }),
     async ({ names, selected }) => Promise.all(names.split("\n").filter((name) => name && name !== selected).map(async (name) => {
@@ -646,16 +667,15 @@ export function DashboardProvider(props: ParentProps) {
   const workProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? (editspaces() ? undefined : null)
   void readHost().then((info) => {
     if (syncableHost(info.id) && info.profile) {
-      const work = info.remote ? [] : workFeedHosts(info).filter((item) => item.profile === info.profile && syncableHost(item.id))
       const clients = [createPinsClient({ host: info.id, prefix: "", profile: info.profile }),
-        ...work.map((item) => createPinsClient({ host: item.id, prefix: `/hosts/${item.id}`, profile: info.profile! }))]
+        ...pinPeerHosts(info).map((item) => createPinsClient({ host: item.id, prefix: `/hosts/${item.id}`, profile: info.profile!, readOnly: item.readOnly }))]
       runWithOwner(owner, () => {
         setOwnPinHost(info.id)
         setPinClients(Object.fromEntries(clients.map((client) => [client.host, client])))
       })
       clients.forEach((client) => void client.refresh())
     }
-    if (info.remote) return
+    if (!aggregates(info)) return
     // A host removed from the Work view (or unpaired) leaves no cached rows behind.
     forgetSeen(info.work.map((item) => item.id))
     runWithOwner(owner, () => setFeeds(workFeedHosts(info).map((item) => createHostFeed(item, workProject, () => [
@@ -678,7 +698,7 @@ export function DashboardProvider(props: ParentProps) {
     value.owners.map((item) => ({ editspace, lane: item.lane, owner: item.owner })))
   createEffect(() => {
     for (const client of Object.values(pinClients())) {
-      if (client.state().status !== "ready" || migratingHosts.has(client.host) || migratedHosts().includes(client.host)) continue
+      if (client.state().status !== "ready" || migratingHosts.has(client.host) || synced(client.host)) continue
       const own = client.host === ownPinHost()
       const feed = own ? undefined : feeds().find((item) => item.host.id === client.host)
       if (!own && !feed) continue
@@ -771,7 +791,7 @@ export function DashboardProvider(props: ParentProps) {
     isPinned: workPinned,
     togglePin: (row) => {
       if (!row.host) return
-      if (pinClients()[row.host]?.state().reason === "profile") return
+      if (pinClients()[row.host]?.state().reason === "profile" || pinClients()[row.host]?.readOnly) return
       const client = usableClient(row.host)
       if (client) {
         const feed = feeds().find((item) => item.host.id === row.host)
@@ -787,7 +807,7 @@ export function DashboardProvider(props: ParentProps) {
       }
       setHostPins((previous) => ({ ...previous, [row.host!]: next }))
       const offline = pinClients()[row.host]
-      if (offline && migratedHosts().includes(row.host)) {
+      if (offline && synced(row.host)) {
         const feed = feeds().find((item) => item.host.id === row.host)
         const ref = rowPinRef(row, feed ? workOwners(feed) : [])
         const existing = offline.state().pins.filter((pin) => pin.ref === ref || pin.ref === `session:${row.id}`)
@@ -799,7 +819,7 @@ export function DashboardProvider(props: ParentProps) {
     dot: (row) => {
       const feed = feeds().find((item) => item.host.id === row.host)
       const status = feed?.live(row.id)
-      return status === "busy" || status === "retry" ? "busy" : "idle"
+      return status === "busy" || status === "retry" ? "busy" : status === "unknown" ? "unknown" : "idle"
     },
   }
 
@@ -810,7 +830,7 @@ export function DashboardProvider(props: ParentProps) {
       { host, rows: client ? sessions() : localClient()?.state().reason === "profile" ? [] : pinnedSessions(), owners: localPinOwners(), client },
       ...feeds().map((feed) => {
         const remote = writable ? feed.state().status === "ready" ? usableClient(feed.host.id) : undefined
-          : orderingPinsClient(pinClients()[feed.host.id], migratedHosts().includes(feed.host.id))
+          : orderingPinsClient(pinClients()[feed.host.id], synced(feed.host.id))
         return {
           host: feed.host.id,
           rows: remote ? feed.state().rows : pinClients()[feed.host.id]?.state().reason === "profile" ? [] : work.pinned().filter((row) => row.host === feed.host.id),

@@ -23,6 +23,11 @@ export type ViewDiff = {
   deletions: number
   status?: "added" | "deleted" | "modified"
   fileDiff: FileDiffMetadata
+  /**
+   * Core left this patch out of an inline summary (`patchOmitted`). `fileDiff` is then empty and must not be shown
+   * as the change; render a notice, or load the patch from `GET /session/:sessionID/diff?messageID=`.
+   */
+  omitted?: true
 }
 
 const diffCacheLimit = 16
@@ -37,7 +42,16 @@ export function resolveFileDiff(diff: DiffSource) {
   )
 }
 
-export function normalize(diff: ReviewDiff): ViewDiff {
+export function normalize(diff: ReviewDiff & { patchOmitted?: boolean }): ViewDiff {
+  if (diff.patchOmitted === true && typeof diff.patch !== "string")
+    return {
+      file: diff.file,
+      additions: diff.additions,
+      deletions: diff.deletions,
+      status: diff.status,
+      fileDiff: emptyFileDiff(diff.file),
+      omitted: true,
+    }
   return {
     file: diff.file,
     additions: diff.additions,

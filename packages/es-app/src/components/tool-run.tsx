@@ -3,11 +3,15 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { getToolInfo, Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
 import { Icon } from "@opencode-ai/ui/icon"
 import { runSummary, toolOutcome, type ToolRunGroup } from "../transcript-groups"
-import { SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
+import { chars, SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
 import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edit"
 import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
 import { mailReceipts, mailSentText, useMailRecords } from "../mail-receipts"
 import { Glyph } from "./icons"
+import { TickMark } from "./message-tick"
+import { ocAt } from "../api"
+import { useSessionHost } from "../session-host"
+import { hydrate } from "../page-parts"
 
 const STRIP_ICONS = 12
 
@@ -15,8 +19,10 @@ const STRIP_ICONS = 12
 // fixed, so a tier change while a call streams never moves the row; the glyph inside scales with the call's known
 // input + output size (data-size), and an unknown size stays neutral rather than reading as small.
 // A call that sent mail (its receipt says so) wears the mail chips' sent glyph.
-const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude; mail?: boolean }) =>
+// `running`: the call is executing now (state "running", not "pending"); only then does its icon pulse.
+const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude; mail?: boolean; running?: boolean }) =>
   <span class="tool-run-icon" data-tool={props.tool} data-status={props.status} data-filament-icon={props.partID} data-mail={props.mail ? "sent" : undefined}
+    data-running={props.running ? "" : undefined}
     data-size={props.magnitude?.kind === "sized" ? props.magnitude.size : "unknown"} aria-hidden="true">
     <Show when={props.mail} fallback={<Icon name={(isEditTool(props.tool) ? "pencil-line" : props.icon) as never} size="normal" />}><Glyph name="paper-airplane" /></Show>
   </span>
@@ -24,13 +30,19 @@ const ToolIcon = (props: { partID: string; tool: string; status: string; icon: s
 /** The mail a call sent, from its receipt lines and this page's mail records (Laptop2627). */
 const useMailSent = (part: () => ToolPart) => {
   const records = useMailRecords()
-  return createMemo(() => { const receipts = mailReceipts(part()); return receipts.length ? { receipts, ...mailSentText(receipts, records) } : undefined })
+  return createMemo(() => {
+    const receipts = mailReceipts(part())
+    if (!receipts.length) return undefined
+    // A receipt whose receipts this page has not read asks for its sender lane's feed, once per lane.
+    receipts.forEach((receipt) => { if (!records.complete(receipt.id)) records.want(receipt) })
+    return { receipts, ...mailSentText(receipts, records) }
+  })
 }
 type MailSent = ReturnType<ReturnType<typeof useMailSent>>
 // The card names the mail and each recipient's delivery in place of the shell description.
 const withMail = (card: Card, mail: MailSent) => mail
   ? { ...card, head: [`Mail sent`, STATE_WORDS[card.status]].filter(Boolean).join(" · "), description: mail.detail.join(" · "),
-    label: [`Mail sent`, STATE_WORDS[card.status], mail.text, mail.state, card.time].filter(Boolean).join(", ") }
+    label: [`Mail sent`, STATE_WORDS[card.status], mail.text, mail.tick.label.replaceAll("\n", "; "), card.time].filter(Boolean).join(", ") }
   : card
 
 /** "a.ts +3 −1", "3 files +12 −4", or just the file name(s) when the tool reported no counts. */
@@ -138,10 +150,12 @@ export const ToolRun = (props: {
           const member = byPart().get(partID)!
           const item = createMemo(() => members().get(partID))
           const parts = createMemo(() => item() ? [item()!.part] : [], [], { equals: (a, b) => a[0] === b[0] })
+          // An opened run shows each member's real output: a call a compact page shortened is read in full once.
+          createEffect(() => { const part = item()?.part; if (part) hydrate(part) })
           return <div class="tool-run-member" data-tool-run-member={member.partID} data-call-id={member.callID}
             data-message-id={member.messageID} data-find-selected={props.selectedPart === member.partID ? "true" : undefined}>
             <Show when={props.selectedPart === member.partID}>{props.excerpt}</Show>
-            <Show when={item()?.message}>{(message) => <Message message={message()} parts={parts()} activityRows renderTools={props.renderTools} />}</Show>
+            <Show when={item()?.message}>{(message) => <ToolPartView message={message()} part={parts()[0] as ToolPart} renderTools={props.renderTools} />}</Show>
           </div>
         }}</For>
       </div>
@@ -169,7 +183,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
   const status = createMemo(() => toolOutcome(props.part))
   const edit = createMemo(() => editSummary(props.part))
   // An edit names its file and confirmed line counts in place of the generic subtitle.
-  const what = () => { const sent = mail(); if (sent) return `${sent.text} · ${sent.state}`; const value = edit(); return value ? editText(value) : info().subtitle }
+  const what = () => { const sent = mail(); if (sent) return sent.text; const value = edit(); return value ? editText(value) : info().subtitle }
   // A short reason in words, so a failure reads without colour: the tool's error line or its exit code.
   const reason = createMemo(() => {
     const state = props.part.state
@@ -177,7 +191,12 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     const exit = state.status === "completed" ? state.metadata?.exit : undefined
     return typeof exit === "number" && exit !== 0 ? `exit ${exit}` : undefined
   })
-  const label = () => [info().title, STATE_WORDS[status()], what(), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
+  const label = () => [info().title, STATE_WORDS[status()], what(), mail()?.tick.label.replaceAll("\n", "; "), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
+  const partialOutput = () => {
+    const state = props.part.state
+    const output = state.status === "error" && state.metadata?.interrupted === true ? state.metadata.output : undefined
+    return typeof output === "string" && output.trim() ? output : undefined
+  }
   let button: HTMLButtonElement | undefined
   return <span class="tool-chip" data-compact={open() ? undefined : "true"} data-open={open() ? "true" : undefined} data-status={status()}
     data-timeline-part-id={props.part.id} data-filament-anchor={props.part.id}
@@ -189,20 +208,22 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       button?.focus()
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
-      onClick={() => setOpen(!open())}>
-      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} />
+      onClick={() => { if (!open()) hydrate(props.part); setOpen(!open()) }}>
+      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} running={props.part.state.status === "running"} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
       </span>
+      {/* Mail ticks (mail-ticks.ts): ✓ sending, ✓✓ grey in the recipient's inbox, ✓✓ accent shown to its agent, ! failed. */}
+      <Show when={mail()}>{(sent) => <TickMark tick={sent().tick.tick} label={sent().tick.label.replaceAll("\n", "; ")} />}</Show>
       <Show when={!open()}><CallCard card={card()} /></Show>
     </button>
     <Show when={open()}>
       <div class="tool-chip-member">
         {/* Each mail this call sent, with its recipients' delivery, and a way to its mail row when the transcript shows one. */}
         <Show when={mail()}>{(sent) => <ul class="tool-chip-files tool-chip-mail" aria-label="Mail sent">
-          <For each={sent().receipts}>{(receipt, index) => <li><bdi dir="auto">{sent().detail[index()]}</bdi>
-            <Show when={records(receipt.id)}> <button class="tool-chip-mail-open" onClick={() => document.querySelector(`[data-mail-id="${CSS.escape(receipt.id)}"]`)?.scrollIntoView({ block: "center" })}>Show mail</button></Show></li>}</For>
+          <For each={sent().receipts}>{(receipt, index) => <li><bdi dir="auto" data-ticket-refs="off">{sent().detail[index()]}</bdi>
+            <Show when={records.record(receipt.id)}> <button class="tool-chip-mail-open" onClick={() => document.querySelector(`[data-mail-id="${CSS.escape(receipt.id)}"]`)?.scrollIntoView({ block: "center" })}>Show mail</button></Show></li>}</For>
         </ul>}</Show>
         {/* Every file an edit touched, with its own confirmed counts; the original chip follows with the diff. */}
         <Show when={(edit()?.files.length ?? 0) > 1}>
@@ -211,10 +232,64 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
               <Show when={file.additions !== undefined}><span class="tool-chip-counts" dir="ltr"> +{file.additions} −{file.deletions}</span></Show></li>}</For>
           </ul>
         </Show>
-        <Message message={props.message} parts={[props.part]} activityRows renderTools={props.renderTools} />
+        {/* A call Core stopped while it ran is an error card; the output it had captured is shown here. */}
+        <Show when={partialOutput()}>{(output) => <div class="tool-chip-partial"><span class="tool-chip-partial-label">Output before the interruption</span>
+          <pre dir="auto">{output()}</pre></div>}</Show>
+        <ToolPartView message={props.message} part={props.part} renderTools={props.renderTools} />
       </div>
     </Show>
   </span>
+}
+
+/** One tool call's details as a compact page delivered them: output over 8 KB is shortened (its full text is one read of
+ * that message away, on request), and images the tool returned load from their own route only once this view is
+ * open and the image scrolls into view. */
+const ToolPartView = (props: { message: ComponentProps<typeof Message>["message"]; part: ToolPart; renderTools?: ToolRenderers }) => {
+  const host = useSessionHost()
+  const [full, setFull] = createSignal<ToolPart>()
+  const [state, setState] = createSignal<"idle" | "loading" | "failed">("idle")
+  const part = () => full() ?? props.part
+  const shortened = () => {
+    const value = props.part.state
+    const length = value.status === "completed" ? (value.metadata?.pageTruncated as { output?: unknown } | undefined)?.output : undefined
+    return value.status === "completed" && typeof length === "number" && length > value.output.length ? length : undefined
+  }
+  // The full message is read where the session runs (its working directory, as the assistant message records it).
+  const directory = () => (props.message as { path?: { cwd?: string } }).path?.cwd
+  const showFull = async () => {
+    const cwd = directory()
+    if (!cwd || state() === "loading") return
+    setState("loading")
+    const message = await ocAt(host.base).message(props.part.sessionID, cwd, props.part.messageID).catch(() => undefined)
+    const found = message?.parts.find((item) => item.id === props.part.id)
+    if (found?.type === "tool") { setFull(found); setState("idle") }
+    else setState("failed")
+  }
+  const attachments = createMemo(() => {
+    const value = part().state
+    return (value.status === "completed" ? value.attachments ?? [] : []).flatMap((file) => {
+      const image = file.mime.startsWith("image/")
+      // A route on this host, or a small inline image; never an arbitrary link or an inline document.
+      const routed = file.url.startsWith("/") && !file.url.startsWith("//")
+      const inline = image && file.url.startsWith(`data:${file.mime};`)
+      return routed || inline ? [{ url: file.url, image, name: file.filename || (image ? "image" : "attachment") }] : []
+    })
+  })
+  return <>
+    <Message message={props.message} parts={[part()]} activityRows renderTools={props.renderTools} />
+    <Show when={!full() && shortened() && directory()}>
+      <p class="tool-full-output"><button type="button" class="tool-chip-mail-open" disabled={state() === "loading"} onClick={() => void showFull()}>
+        {state() === "loading" ? "Loading full output…" : `Show full output (${chars(shortened()!)} chars)`}</button>
+        <Show when={state() === "failed"}><span class="home-blocked" role="alert"> Full output could not be read.</span></Show></p>
+    </Show>
+    <Show when={attachments().length}>
+      <div class="tool-attachments" data-tool-attachments={props.part.id}>
+        <For each={attachments()}>{(file) => file.image
+          ? <img src={file.url} alt={file.name} loading="lazy" decoding="async" data-tool-attachment />
+          : <a href={file.url} target="_blank" rel="noopener noreferrer" data-tool-attachment>{file.name}</a>}</For>
+      </div>
+    </Show>
+  </>
 }
 
 type Card = ReturnType<typeof callCard>
@@ -224,7 +299,8 @@ type Card = ReturnType<typeof callCard>
 const CallCard = (props: { card: Card }) =>
   <span class="tool-run-preview tool-call-card" aria-hidden="true">
     <span class="tool-run-kind"><bdi dir="auto">{props.card.head}</bdi></span>
-    <Show when={props.card.description}><span class="tool-call-description" dir="auto">{props.card.description}</span></Show>
+    {/* Solid owns this text and it changes as receipts arrive; the ticket-ref wrapper must not split its node. */}
+    <Show when={props.card.description}><span class="tool-call-description" dir="auto" data-ticket-refs="off">{props.card.description}</span></Show>
     <Show when={props.card.time}><span class="tool-run-span" dir="ltr">{props.card.time}</span></Show>
     <span class="tool-run-sizes" dir="ltr">{props.card.sizes}</span>
   </span>
@@ -299,7 +375,8 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
             <button class="tool-chip-summary" ref={(element) => buttons.set(id, element)} tabIndex={current() === id ? 0 : -1}
               aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
               onFocus={() => setActive(id)} onClick={() => toggle(id)}>
-              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} />
+              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} running={part().state.status === "running"} />
+              <Show when={mail()}>{(sent) => <TickMark tick={sent().tick.tick} label={sent().tick.label.replaceAll("\n", "; ")} />}</Show>
               <CallCard card={card()} />
             </button>
           </span>
@@ -317,7 +394,7 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
           toggle(id)
           buttons.get(id)?.focus()
         }}>
-        <Show when={byID().get(id)}>{(part) => <Message message={props.message} parts={[part()]} activityRows renderTools={props.renderTools} />}</Show>
+        <Show when={byID().get(id)}>{(part) => <ToolPartView message={props.message} part={part()} renderTools={props.renderTools} />}</Show>
       </div>
     }</For>
   </div>

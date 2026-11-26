@@ -93,23 +93,39 @@ export const contextGroups = (input: {
     .map((record) => ({ record, score: score(record.title, record.lane ?? undefined, record.context) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || Number(a.record.status !== "open") - Number(b.record.status !== "open") || b.record.updated_at - a.record.updated_at)
-    .map(({ record }): ContextRef => ({ kind: "decision", id: record.id, host: input.host, label: record.title, editspace: record.editspace,
-      revision: record.content_revision ?? record.revision, status: record.status, lane: record.lane ?? undefined, ask: record.kind,
-      question: clip(record.context, 1200), options: record.options.slice(0, 8).map((option) => clip(option.label, 120)),
-      recommendation: record.recommendation ? clip(record.recommendation, 300) : undefined, updated: record.updated_at }))
+    .map(({ record }) => decisionRef(record, input.host))
     .filter((ref) => !added.has(contextKey(ref)))
     .slice(0, 6)
   const surfaces = (input.surfaces ?? [])
     .map((surface) => ({ surface, score: score(surface.title, surface.lane ?? undefined, surface.owner, surface.summary ?? undefined) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || b.surface.updated_at - a.surface.updated_at)
-    .map(({ surface }): ContextRef => ({ kind: "surface", id: surface.id, host: input.host, label: surface.title, editspace: surface.editspace,
-      revision: surface.revision, owner: surface.owner, lane: surface.lane ?? undefined, summary: surface.summary ? clip(surface.summary, 600) : undefined,
-      purpose: surface.purpose ?? "board", updated: surface.updated_at, health: surface.health.state }))
+    .map(({ surface }): ContextRef => surfaceRef(surface, input.host))
     .filter((ref) => !added.has(contextKey(ref)))
     .slice(0, 6)
   return ([{ name: "Agents", items: agents }, { name: "Sessions", items: sessions }, { name: "Decisions", items: decisions },
     { name: "Surfaces", items: surfaces }] as ContextGroup[]).filter((group) => group.items.length)
+}
+
+/** A surface chip: the Surface's title and summary at its current revision, on `host` (this window's host, or another
+ * Work host's ID). The @ picker and a Surface's Message owner build the same chip. */
+export const surfaceRef = (surface: SurfaceCandidate, host: string): Extract<ContextRef, { kind: "surface" }> => ({
+  kind: "surface", id: surface.id, host, label: surface.title, editspace: surface.editspace,
+  revision: surface.revision, owner: surface.owner, lane: surface.lane ?? undefined, summary: surface.summary ? clip(surface.summary, 600) : undefined,
+  purpose: surface.purpose ?? "board", updated: surface.updated_at, health: surface.health.state })
+
+/** A decision chip: the record's question and options at its current revision, on `host` (this window's host, or
+ * another Work host's ID). The @ picker and a card's Ask about this build the same chip. */
+export const decisionRef = (record: DecisionCandidate, host: string): Extract<ContextRef, { kind: "decision" }> => ({
+  kind: "decision", id: record.id, host, label: record.title, editspace: record.editspace,
+  revision: record.content_revision ?? record.revision, status: record.status, lane: record.lane ?? undefined, ask: record.kind,
+  question: clip(record.context, 1200), options: record.options.slice(0, 8).map((option) => clip(option.label, 120)),
+  recommendation: record.recommendation ? clip(record.recommendation, 300) : undefined, updated: record.updated_at })
+
+/** Appends `@Label ` to the end of a draft, keeping its text, with one space before it when needed. */
+export const appendContextLabel = (text: string, label: string) => {
+  const inserted = `${text && !/\s$/.test(text) ? " " : ""}@${label.replace(/\s+/g, " ").trim()} `
+  return { text: text + inserted, caret: text.length + inserted.length }
 }
 
 /** What adding this item attaches, stated before it is added. */
@@ -127,8 +143,16 @@ export const insertContextLabel = (text: string, start: number, caret: number, l
   return { text: text.slice(0, start) + inserted + text.slice(caret), caret: start + inserted.length }
 }
 
-/** The bounded, source-linked snapshot one chip sends as a synthetic context part. */
-export const contextPart = (ref: ContextRef, url: string, asOf: number): ContextPart => {
+/** Where a context part came from, shown to the human in the transcript: attached while the Surface reader was open,
+ * or added as an @ chip. It never changes what the agent reads. */
+export type ContextOrigin = "reader" | "chip"
+
+/** The exact revision in the in-app reader (the cite form): `&rev=N` beside `?surface=` or the host-qualified item. */
+const citeHref = (url: string, revision: number | undefined) => revision === undefined ? url : `${url}${url.includes("?") ? "&" : "?"}rev=${revision}`
+
+/** The bounded, source-linked snapshot one chip sends as a synthetic context part. The model-facing text is the same
+ * for every origin; `origin` and the reference metadata only let this app's transcript say where it came from. */
+export const contextPart = (ref: ContextRef, url: string, asOf: number, origin: ContextOrigin = "chip"): ContextPart => {
   const revision = ref.kind === "decision" || ref.kind === "surface" ? { revision: ref.revision } : {}
   const record = { kind: ref.kind, id: ref.id, host: ref.host, ...revision, asOf: iso(asOf), url }
   const lead = "Context the person attached (a reference, not a request to contact anyone)"
@@ -151,5 +175,6 @@ export const contextPart = (ref: ContextRef, url: string, asOf: number): Context
   const tail = `\nLink: ${url}\nReference: ${JSON.stringify(record)}`
   const text = `${fitBytes(lines.join("\n"), SNAPSHOT_BYTES - bytes(tail))}${tail}`
   return { type: "text", text, synthetic: true,
-    metadata: { source: CONTEXT_MENTION_SOURCE, key: contextKey(ref) } }
+    metadata: { source: CONTEXT_MENTION_SOURCE, key: contextKey(ref), origin, kind: ref.kind, label: ref.label,
+      ...(revision ? { revision: (ref as { revision: number }).revision } : {}), href: citeHref(url, (ref as { revision?: number }).revision), asOf: iso(asOf) } }
 }

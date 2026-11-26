@@ -49,7 +49,7 @@ try {
 
   // Close from inside the chat: focus returns to nav; the mounted pane is inert and keeps its width inside.
   await composer.focus()
-  await page.getByRole("button", { name: "Close Front desk chat" }).click()
+  await page.getByRole("button", { name: "Close Porter" }).click()
   await expect(nav).toBeFocused()
   await expect(nav).toHaveAttribute("aria-pressed", "false")
   await expect(companion).toHaveClass(/closed/)
@@ -67,8 +67,8 @@ try {
   const endTop = await question.count() ? (await question.boundingBox()).y : act.y
   expect(act.x, "answer column at inline-end").toBeGreaterThan(explain.x + explain.width - 1)
   expect(Math.abs(endTop - explain.y), "columns share a top").toBeLessThan(2)
-  const send = await page.getByRole("button", { name: /^Send/ }).first().boundingBox()
-  expect(send.y + send.height, "Send fits the window").toBeLessThanOrEqual(1000)
+  const answer = await page.locator('[data-attention-id="decision_1"]').getByRole("button", { name: /^Small scope/ }).boundingBox()
+  expect(answer.y + answer.height, "direct answer fits the window").toBeLessThanOrEqual(1000)
 
   await nav.click()
   await expect(composer).toBeVisible()
@@ -82,9 +82,9 @@ try {
   await expect(companion).toHaveClass(/closed/)
   await decision.click()
   await expect(companion).toHaveClass(/closed/)
-  await page.locator('a.nav-entry[href="/agents"]').click()
+  await page.locator('a.nav-quick-item[href="/agents"]').click()
   await expect(companion).toHaveClass(/closed/)
-  await page.locator('a.nav-entry[aria-label^="Decisions & inbox"]').click()
+  await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(companion).toHaveClass(/closed/)
   await expect(companion).toHaveAttribute("aria-hidden", "true")
@@ -124,7 +124,7 @@ try {
   expect(Math.round(sheetBox.y + sheetBox.height)).toBe(800)
   await expect(sheet.locator("textarea")).toBeVisible()
   await shot(narrow.page, "390-sheet")
-  await sheet.getByRole("button", { name: "Close Front desk chat" }).click()
+  await sheet.getByRole("button", { name: "Close Porter" }).click()
   await expect(sheet).toHaveClass(/closed/)
   expect(await sheet.evaluate(el => el.inert)).toBe(true)
   await narrow.page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()

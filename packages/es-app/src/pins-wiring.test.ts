@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isRowPinned, legacyPinsCovered, migrateReadyPins, migrationRefs, movePinnedRow, orderingPinsClient, pinnedRows, pinnedUnionRows, pinMigrationReady, rowPinRef } from "./pin-view"
+import { isRowPinned, legacyPinsCovered, migrateReadyPins, migrationRefs, movePinnedRow, orderingPinsClient, pinPeerHosts, pinnedRows, pinnedUnionRows, pinMigrationReady, rowPinRef } from "./pin-view"
 import { createPinsClient, syncableHost, type Pin } from "./pins-sync"
 
 const storage = () => {
@@ -33,7 +33,7 @@ const hostStore = () => {
     }
     return Response.json({ rev: 2, applied: true, current: pins.has(ref) ? { state: "pinned", ...pins.get(ref) } : { state: "unpinned", at: body.at } })
   }
-  return { send, writes, orders, state }
+  return { send, writes, orders, state, pins }
 }
 
 describe("dashboard pin wiring", () => {
@@ -268,5 +268,46 @@ describe("dashboard pin wiring", () => {
     expect(remote.state().pending).toBe(0)
     expect(mini.orders).toEqual([-200])
     expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_high", "ses_work", "ses_low"])
+  })
+})
+
+describe("Personal aggregator pins (contract §5, M3)", () => {
+  const personal = [
+    { id: "excalibur", label: "Excalibur", origin: "http://127.0.0.1:5", profile: "personal" as const, default: true as const },
+    { id: "ygnium", label: "Ygnium", origin: "http://127.0.0.1:5", profile: "personal" as const, readOnly: true as const },
+    { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work" as const },
+  ]
+
+  test("a Personal aggregator reads its Personal peers' pin stores; a Work host's own tab and a Work host never", () => {
+    expect(pinPeerHosts({ id: "excalibur", remote: true, profile: "personal", work: personal }).map((item) => [item.id, item.readOnly])).toEqual([["ygnium", true]])
+    expect(pinPeerHosts({ id: "mini", remote: true, profile: "work", work: [{ id: "laptop", label: "Laptop", origin: "http://127.0.0.1:1", profile: "work" }] })).toEqual([])
+    expect(pinPeerHosts({ id: "laptop", remote: false, profile: "work", work: personal }).map((item) => item.id)).toEqual(["mini"])
+  })
+
+  test("a read-only peer's pins join the union and anchor a move of an own pin; they never move and its store gets no write", async () => {
+    const excalibur = hostStore()
+    const ygnium = hostStore()
+    ygnium.state.profile = "personal"
+    excalibur.state.profile = "personal"
+    ygnium.pins.set("session:ses_y_new", { ref: "session:ses_y_new", pinnedAt: 300 })
+    ygnium.pins.set("session:ses_y_old", { ref: "session:ses_y_old", pinnedAt: 100 })
+    const own = createPinsClient({ host: "excalibur", prefix: "", profile: "personal", fetch: excalibur.send, storage: storage(), now: () => 50 })
+    const peer = createPinsClient({ host: "ygnium", prefix: "/hosts/ygnium", profile: "personal", readOnly: true, fetch: ygnium.send, storage: storage() })
+    const mine = { id: "ses_mine", directory: "/a" }
+    const newer = { id: "ses_y_new", directory: "/b", host: "ygnium" }
+    const older = { id: "ses_y_old", directory: "/b", host: "ygnium" }
+    const groups = () => [
+      { host: "excalibur", client: own, owners: [], rows: [mine] },
+      { host: "ygnium", client: peer, owners: [], rows: [newer, older] },
+    ]
+    await Promise.all([own.refresh(), peer.refresh()])
+    await own.pin("session:ses_mine")
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_y_new", "ses_y_old", "ses_mine"])
+    expect(movePinnedRow("excalibur", groups(), older, undefined, newer)).toBe(false)
+    expect(movePinnedRow("excalibur", groups(), mine, newer, older)).toBe(true)
+    await own.refresh()
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_y_new", "ses_mine", "ses_y_old"])
+    expect(excalibur.orders).toEqual([-200])
+    expect(ygnium.writes).toEqual([])
   })
 })

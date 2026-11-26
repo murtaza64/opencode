@@ -10,7 +10,7 @@ import type { DeskItem } from "./desk"
 import type { AttentionRecord } from "./attention"
 import type { HomeRequestRow } from "./home-requests"
 import type { HostFeed, ReachReason } from "./host-feed"
-import { surfaceKey, type Surface } from "./surfaces"
+import { deliverables, surfaceKey, type Surface } from "./surfaces"
 
 /** What an entry of another host carries for its detail and actions on that host. */
 export type RemoteRef =
@@ -154,3 +154,17 @@ export const workCountLabel = (queue: Pick<WorkQueue, "count" | "partial" | "beh
   text: `${queue.count}${queue.partial ? "+" : ""}`,
   title: queue.partial ? `${queue.behind.join(", ")}: not current` : undefined,
 })
+
+/** Other Work hosts' requested deliverables not yet Done at their current revision, newest first, each from that host's
+ * own Surface list and opened in this window (Done/Undo go to that host only). Personal hosts never take part. */
+export const workTries = (feeds: HostFeed[]) => {
+  const work = feeds.filter((feed) => !feed.host.readOnly && (feed.host.profile ?? "work") === "work")
+  return {
+    entries: work.flatMap((feed) => deliverables(feed.state().surfaces, new Map()).fresh.map((surface) =>
+      remoteEntry(feed, surfacesBehind(feed), surfaceKey(surface.id), {
+        kind: "surface", title: surface.title, project: surface.editspace, updated: surface.updated_at, ...(surface.created_at ? { created: surface.created_at } : {}),
+        remote: { kind: "surface", surface, frame: surface.kind === "path" ? "host" : "own-host-only" },
+      }))),
+    behind: work.filter(surfacesBehind).map((feed) => feed.host.label),
+  }
+}

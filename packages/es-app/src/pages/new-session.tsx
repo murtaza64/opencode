@@ -14,9 +14,11 @@ import { oc, SessionCreateError, type SessionCreateBody } from "../api"
 import { sendFirstMessage } from "../composer"
 import { sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
+import { ModelPicker } from "../components/model-picker"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { shortcutLabel } from "../shortcuts"
 import "./new-session.css"
+import { markAncestor } from "../dom-marks"
 
 const DRAFT = "es-app:new-session:draft:1"
 const LAST = "es-app:new-session:last:1"
@@ -49,6 +51,12 @@ export default function NewSessionPage() {
   const [directory, setDirectory] = createSignal(saved.directory ?? "")
   const [agent, setAgent] = createSignal(saved.agent ?? last.agent ?? "")
   const [model, setModel] = createSignal(saved.model ?? last.model ?? "")
+  const [pickingModel, setPickingModel] = createSignal(false)
+  let modelButton: HTMLButtonElement | undefined
+  const closeModelPicker = () => {
+    setPickingModel(false)
+    queueMicrotask(() => modelButton?.focus({ preventScroll: true }))
+  }
   const [text, setText] = createSignal(saved.text ?? "")
   const [pending, setPending] = createSignal(false)
   const [error, setError] = createSignal("")
@@ -65,7 +73,8 @@ export default function NewSessionPage() {
   // replaced by another.
   const route = useLocation()
   void readHost()
-  const workHosts = () => host()?.work ?? []
+  // A read-only peer (pinned-SSH Personal host) is never a target: nothing creates a session there from this page.
+  const workHosts = () => (host()?.work ?? []).filter((item) => !item.readOnly)
   const destination = createMemo(() => {
     const hosts = workHosts()
     const asked = new URLSearchParams(route.search).get("host")
@@ -204,7 +213,7 @@ export default function NewSessionPage() {
   // An unconfirmed attempt from before a reload is checked once on open.
   if (attempt()) queueMicrotask(() => void reconcile())
 
-  return <main class="session-page new-session-page">
+  return <main class="session-page new-session-page" ref={(el) => markAncestor(() => el, ".content", "session-page", true)}>
     <div class="session-main">
       <AppHeader><h1>New session</h1></AppHeader>
       <div class="new-session-space" />
@@ -230,12 +239,20 @@ export default function NewSessionPage() {
             <option value="" selected={!agent()}>default agent</option>
             <For each={primaryAgents()}>{(item) => <option value={item.name} selected={item.name === agent()}>{item.name}</option>}</For>
           </select>
-          <select aria-label="Model" value={modelValue()} disabled={locked()} onChange={(event) => setModel(event.currentTarget.value)}>
-            <option value="" selected={!modelValue()}>default model</option>
-            <For each={providers()?.providers ?? []}>{(provider) => <optgroup label={provider.id}>
-              <For each={Object.keys(provider.models ?? {})}>{(id) => <option value={`${provider.id}\u0000${id}`} selected={modelValue() === `${provider.id}\u0000${id}`}>{id}</option>}</For>
-            </optgroup>}</For>
-          </select>
+          <button ref={modelButton} type="button" class="new-session-model" aria-label="Choose model" aria-haspopup="dialog"
+            aria-expanded={pickingModel()} disabled={locked()} onClick={() => setPickingModel(true)}>
+            <bdi>{(() => {
+              const [providerID, modelID] = modelValue().split("\u0000")
+              return providers()?.providers.find((item) => item.id === providerID)?.models?.[modelID!]?.name || modelID || "Default model"
+            })()}</bdi>
+          </button>
+          <Show when={pickingModel()}><ModelPicker providers={providers()?.providers ?? []} loading={providers.loading}
+            label="New session model" inheritedLabel="Default model"
+            selected={modelValue() ? { providerID: modelValue().split("\u0000")[0]!, modelID: modelValue().split("\u0000")[1]! } : null}
+            onClose={closeModelPicker} onChoose={(value) => {
+              setModel(value ? `${value.providerID}\u0000${value.modelID}` : "")
+              closeModelPicker()
+            }} /></Show>
         </div>
         </Show>
         <textarea ref={editor} aria-label="Message" dir="auto" value={text()} readOnly={locked()}

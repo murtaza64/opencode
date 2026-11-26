@@ -1,5 +1,5 @@
 .desk { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0; padding: 0; box-sizing: border-box; font-size: 13px; }
-.content:has(.desk) { overflow: hidden; }
+.content[data-desk] { overflow: hidden; }
 .desk h1 { font-size: 17px; }
 .desk h2 { font-size: 13px; margin: 18px 0 8px; font-weight: 600; color: var(--text); }
 .desk h2 span { color: var(--yellow); margin-inline-start: 6px; }
@@ -100,7 +100,7 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 @container (max-width: 480px) { .attention-home fieldset.home-option-cards { grid-template-columns: minmax(0, 1fr); } }
 .attention-home .home-option-card { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--surface1); background: var(--mantle); }
 .attention-home .home-option-card[data-recommended] { border-color: var(--green); }
-.attention-home .home-option-card:has(input:checked) { border-color: var(--peach); }
+.attention-home .home-option-card[data-checked] { border-color: var(--peach); }
 .attention-home .home-option-card input { margin: 2px 0 0; flex: none; }
 .home-option-body { display: flex; flex-direction: column; gap: 4px; min-inline-size: 0; font-size: 13px; line-height: 1.45; }
 .home-option-label { font-weight: 600; }
@@ -124,9 +124,18 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 /* Folding chat (orchestrator#83): beside a selection the chat can fold to a 36px rail at the
  * inline-end edge. The folded chat stays laid out at its last width, hidden and inert. */
 .desk-grid { position: relative; }
-.desk-has-selection .desk-grid:has(> .desk-chat-rail) { grid-template-columns: var(--queue-width, 240px) minmax(0, 1fr) 36px; }
 .desk-chat-folded { position: absolute; inset-block: 0; inset-inline-end: 0; inline-size: var(--chat-width, 400px); visibility: hidden; pointer-events: none; }
 .desk-chat-hide .icon, .desk-chat-hide svg { transform: rotate(-90deg); }
+.desk-host { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
+.desk-host[data-placed="fallback"] { color: var(--yellow); }
+.desk-header-avatar, .desk-reply-avatar { inline-size: 20px; block-size: 20px; border-radius: 50%; object-fit: cover; flex: none; }
+.desk-reply-avatar { display: block; margin-block: 8px 2px; }
+.desk-earlier-menu { position: relative; display: inline-flex; }
+.desk-earlier-list { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-start: 0; z-index: 20; min-inline-size: 240px; max-inline-size: 320px;
+  padding: 6px 0; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.3); }
+.desk-earlier-list ul { list-style: none; margin: 0; padding: 0; }
+.desk-earlier-list li { display: flex; flex-direction: column; gap: 1px; padding: 5px 12px; font-size: 12px; }
+.desk-earlier-list a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-chat-hide:dir(rtl) .icon, .desk-chat-hide:dir(rtl) svg { transform: rotate(90deg); }
 .desk-chat-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-block: 10px; background: var(--mantle); border-inline-start: 1px solid var(--surface0); cursor: pointer; }
 .desk-chat-show { display: inline-flex; align-items: center; justify-content: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext1); background: transparent; border: 0; cursor: pointer; }
@@ -161,7 +170,7 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
   .home-decision-more { grid-column: 1; grid-row: 4; align-self: start; }
   .home-decision-act { grid-column: 2; grid-row: 2 / 5; align-self: start; }
   /* When the options are themselves pictures, they need the full width side by side instead. */
-  .desk-evidence .home-decision:has(.home-option-sketch) { display: block; }
+  .desk-evidence .home-decision[data-sketch] { display: block; }
 }
 /* Question-first card: the human question is the largest text; the producer title is one muted line. */
 .home-decision h3.home-question { font-size: 16px; line-height: 1.35; margin-block: 2px 0; }
@@ -184,9 +193,9 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .home-request-line { font-size: 11px; color: var(--subtext0); margin: 2px 0 6px; }
 /* An option with a picture: the picture fills the top of the card at 16:10, the label and consequence
  * sit under it, and cards stack one per row when too narrow for a readable picture. */
-.attention-home fieldset.home-option-cards:has(.home-option-sketch) { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.attention-home .home-option-card:has(.home-option-sketch) { position: relative; }
-.attention-home .home-option-card:has(.home-option-sketch) input { position: absolute; inset-block-start: 22px; inset-inline-end: 22px; margin: 0; }
+.attention-home fieldset.home-option-cards[data-sketch] { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.attention-home .home-option-card[data-sketch] { position: relative; }
+.attention-home .home-option-card[data-sketch] input { position: absolute; inset-block-start: 22px; inset-inline-end: 22px; margin: 0; }
 .home-option-sketch { margin: 0 0 4px; }
 .home-option-sketch iframe { inline-size: 100%; aspect-ratio: 16 / 10; block-size: auto !important; border: 0; display: block; border-radius: 4px; }
 .home-option-note { font-size: 11px; color: var(--subtext0); }
@@ -205,7 +214,7 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .home-quote-failed { margin: 6px 0; font-size: 12px; color: var(--peach); }
 .desk-bubble-who a { color: inherit; }
 .desk-bubble-text { color: inherit; }
-.home-answer:has(.home-option-sketch) { max-width: none; }
+.home-answer[data-sketch] { max-width: none; }
 
 .desk-change :is(th, td) { padding: 3px 10px 3px 0; text-align: start; vertical-align: top; border-block-end: 1px solid var(--surface0); }
 .desk-change tr[data-same] :is(th, td) { color: var(--subtext0); }
@@ -214,9 +223,19 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-item-answer { display: block; font-size: 12px; color: var(--subtext1); }
 /* A completed decision's options, read-only: the chosen one carries the selected colour. */
 .attention-home ul.home-chosen { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; list-style: none; padding: 0; margin: 12px 0 0; }
-.attention-home ul.home-chosen:has(.home-option-sketch) { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.attention-home ul.home-chosen[data-sketch] { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .attention-home .home-chosen .home-option-card { opacity: 0.7; }
 .attention-home .home-chosen .home-option-card[data-chosen] { opacity: 1; border-color: var(--peach); }
 .home-option-chips > [data-chosen] { color: var(--peach); border-color: var(--peach); }
 
 
+
+/* Memory archive: docs and session summaries under the notes. */
+.desk-archive h4 { margin: 8px 0 2px; font-size: 11px; color: var(--subtext0); font-weight: 600; }
+.desk-archive-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.desk-archive-list button[aria-current] { font-weight: 600; }
+.desk-archive-doc { margin-block: 8px; padding: 8px; border: 1px solid var(--surface1); border-radius: 6px; }
+.desk-archive-doc textarea { inline-size: 100%; box-sizing: border-box; font: 12px/1.5 var(--font-mono); }
+.desk-archive-text { margin: 4px 0; max-block-size: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--font-mono); color: var(--text); }
+.desk-archive .search-input { inline-size: 100%; margin-block: 6px; }
+.desk-archive-slug { font: inherit; background: none; padding: 0; unicode-bidi: isolate; }

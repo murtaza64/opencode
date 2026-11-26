@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js"
 import { contextBound, contextKey, type ContextGroup, type ContextRef } from "../context-mention"
+import { markAncestor } from "../dom-marks"
 import { ago } from "../state"
 
 const meta = (ref: ContextRef) => {
@@ -36,7 +37,11 @@ const Detail = (props: { item: ContextRef }) => {
 export const ContextPicker = (props: { groups: ContextGroup[]; selected: number; select: (index: number) => void; add: (ref: ContextRef) => void }) => {
   const flat = () => props.groups.flatMap((group) => group.items)
   const current = () => flat()[props.selected]
-  return <div class="context-picker" role="dialog" aria-label="Add context">
+  let el: HTMLDivElement | undefined
+  // The composer lets the picker overflow it (index.css).
+  markAncestor(() => el, ".prompt-box", "context-picker")
+  markAncestor(() => el, ".direct-composer", "context-picker")
+  return <div ref={el} class="context-picker" role="dialog" aria-label="Add context">
     <div class="context-picker-list" role="listbox" aria-label="Context">
       <Show when={flat().length} fallback={<div class="context-picker-empty">No matches</div>}>
         <For each={props.groups}>{(group) => <div role="group" aria-label={group.name}>

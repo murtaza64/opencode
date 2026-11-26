@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { filterReviewFiles, reviewDiffDirectory, reviewDiffKinds, reviewDiffNeedsLoad } from "./review-diff-kinds"
+import {
+  filterReviewFiles,
+  reviewDiffDirectory,
+  reviewDiffKinds,
+  reviewDiffNeedsLoad,
+  turnDiffView,
+  turnReviewDiff,
+  turnSummaryVersion,
+} from "./review-diff-kinds"
 
 describe("reviewDiffKinds", () => {
   test("maps file and directory kinds", () => {
@@ -66,5 +74,53 @@ describe("reviewDiffDirectory", () => {
     expect(reviewDiffDirectory("C:\\", "README.md")).toBe("C:\\")
     expect(reviewDiffDirectory("/", "src/a.ts")).toBe("/src")
     expect(reviewDiffDirectory("C:\\", "src/a.ts")).toBe("C:\\src")
+  })
+})
+
+describe("turnReviewDiff", () => {
+  const patch = "Index: big.ts\n===================================================================\n--- big.ts\t\n+++ big.ts\t\n@@ -0,0 +1,2 @@\n+one\n+two\n"
+  const omitted = { file: "big.ts", additions: 2, deletions: 0, status: "added" as const, patchOmitted: true as const }
+
+  test("an omitted turn row needs loading and takes the rebuilt patch from the session diff route", () => {
+    expect(reviewDiffNeedsLoad(omitted)).toBe(true)
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "added", patch }])).toEqual({
+      file: "big.ts",
+      additions: 2,
+      deletions: 0,
+      status: "added",
+      patch,
+    })
+  })
+
+  test("a rebuilt patch for different counts or status leaves the row omitted", () => {
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 3, deletions: 0, status: "added", patch }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "modified", patch }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "added", patchOmitted: true }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [])).toBeUndefined()
+  })
+
+  test("a row that carries its patch inline is not reloaded", () => {
+    expect(turnReviewDiff({ file: "a.ts", additions: 2, deletions: 0, status: "added", patch }, [])).toBeUndefined()
+  })
+})
+
+describe("turnDiffView", () => {
+  test("a timeline turn row whose patch Core omitted renders no diff, so the timeline shows the omitted notice", () => {
+    expect(turnDiffView({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", patchOmitted: true })).toBeUndefined()
+  })
+
+  test("a timeline turn row with its patch inline renders that patch", () => {
+    const patch = "Index: a.ts\n===================================================================\n--- a.ts\t\n+++ a.ts\t\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
+    const view = turnDiffView({ file: "a.ts", additions: 1, deletions: 1, status: "modified", patch })
+    expect(view?.fileDiff.additionLines.join("")).toBe("one\nthree\n")
+  })
+})
+
+describe("turnSummaryVersion", () => {
+  test("changes when a running turn's summary counts change, so the rebuilt diff is fetched again", () => {
+    const before = [{ file: "big.ts", additions: 2, deletions: 0, status: "added" as const, patchOmitted: true as const }]
+    const after = [{ file: "big.ts", additions: 3, deletions: 0, status: "added" as const, patchOmitted: true as const }]
+    expect(turnSummaryVersion(before)).toBe(turnSummaryVersion([...before]))
+    expect(turnSummaryVersion(after)).not.toBe(turnSummaryVersion(before))
   })
 })

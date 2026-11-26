@@ -1,189 +1,140 @@
 import { describe, expect, test } from "bun:test"
-import type { UsageDaily } from "./api"
-import { costSummary } from "./today-cost"
+import type { OpenRouterUsage, UsageDaily } from "./api"
+import { combineSpend, periodStart, type OriReading, type Reading } from "./today-cost"
 
-const NOW = Date.parse("2026-10-28T12:00:00Z")
+// Friday 2026-11-20 12:00Z: the week began Monday 11-16, the month 11-01.
+const NOW = Date.parse("2026-11-20T12:00:00Z")
 const tokens = { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
 const laptop = { id: "laptop", label: "Laptop", base: "", current: true }
 const mini = { id: "mini", label: "Mini", base: "/hosts/mini", current: false }
 
-const originRollup = (cost: number, extra: Partial<UsageDaily["days"][number]> = {}): UsageDaily => ({
-  estimate: true, basis: "", host: "h", observedAt: new Date(NOW).toISOString(), offsetMinutes: -240,
-  coverage: { scope: "", backfilled: true },
-  days: [{ day: "2026-10-28", cost, complete: true, originOnly: true, originCost: cost, unpricedModels: 0,
-    models: [{ provider: "a", model: "m", cost, coverage: "priced", tokens }], ...extra }],
-  rateLimits: { source: "headers", providers: [] },
-})
-/** An installed Core without origin-only cost (no originOnly/originCost fields). */
-const olderRollup = (cost: number, observedAt = new Date(NOW).toISOString()): UsageDaily => ({
-  estimate: true, basis: "", host: "h", observedAt, offsetMinutes: -240,
-  coverage: { scope: "", backfilled: true },
-  days: [{ day: "2026-10-28", cost, complete: true, unpricedModels: 0, models: [{ provider: "a", model: "m", cost, coverage: "priced", tokens }] }],
-  rateLimits: { source: "headers", providers: [] },
-})
-
-describe("costSummary", () => {
-  test("both hosts origin-supported: combined total of origin-only costs, exact", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(40), readAt: NOW },
-      mini: { value: originRollup(25), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBe(65)
-    expect(summary?.partial).toBe(false)
-    expect(summary?.gaps).toEqual([])
-  })
-
-  test("history copied to another host is counted once: origin cost, not the host's raw daily cost", () => {
-    // Mini's raw 600 includes laptop-run history copied with a migrated session; it ran 25 itself.
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(50), readAt: NOW },
-      mini: { value: originRollup(600, { originCost: 25 }), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBe(75)
-  })
-
-  test("mixed capability: one host without origin-only cost makes the summary partial with no amount", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(40), readAt: NOW },
-      mini: { value: olderRollup(25), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBeUndefined()
-    expect(summary?.partial).toBe(true)
-    expect(summary?.gaps.map((item) => [item.label, item.state])).toEqual([["Mini", "unsupported"]])
-    expect(summary?.hosts.map((item) => item.cost)).toEqual([40, 25])
-  })
-
-  test("setup snapshot 2026-10-28T10:20:37Z (offset -240): two installed older Cores give no combined total", () => {
-    const at = "2026-10-28T10:20:37Z"
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: olderRollup(594.78, at), readAt: NOW },
-      mini: { value: olderRollup(541.65, at), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBeUndefined()
-    expect(summary?.hosts.map((item) => [item.label, item.state, item.cost])).toEqual([["Laptop", "unsupported", 594.78], ["Mini", "unsupported", 541.65]])
-  })
-
-  test("activated Core on a cutoff day (coverage.origin, originOnly false, originCost null) is tracking, not unsupported", () => {
-    const cutoff = (cost: number): UsageDaily => ({ ...originRollup(cost, { originOnly: false, originCost: null }),
-      coverage: { scope: "", backfilled: true, origin: { basis: "step", hostID: "h", originSince: "2026-10-28T14:10:00Z" } } })
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoff(594.78), readAt: NOW },
-      mini: { value: cutoff(541.65), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBeUndefined()
-    expect(summary?.partial).toBe(true)
-    expect(summary?.hosts.map((item) => item.state)).toEqual(["tracking", "tracking"])
-    expect(summary?.hosts[0]?.note).toContain("origin tracked since")
-    expect(summary?.hosts[0]?.note).not.toContain("Core has no origin-only cost")
-  })
-
-  // dotfiles#264 real cutoff-day reads, 2026-10-29T02:39:5xZ, offset -240.
-  const cutoffDay = (host: string, raw: number, originSince: string, partial: UsageDaily["days"][number]["originPartial"]): UsageDaily => ({
-    estimate: true, basis: "", host, observedAt: new Date(NOW).toISOString(), offsetMinutes: -240,
-    coverage: { scope: "", backfilled: true, origin: { basis: "step", hostID: host, originSince } },
-    days: [{ day: "2026-10-28", cost: raw, complete: true, originOnly: false, originCost: null, unpricedModels: 0, originPartial: partial,
-      models: [{ provider: "a", model: "m", cost: raw, coverage: "priced", tokens }] }],
+const day = (offset: number) => new Date(Date.parse("2026-11-20T00:00:00Z") - offset * 86_400_000).toISOString().slice(0, 10)
+/** A UTC rollup with `gateway` per day on a duolingo provider and `openrouter` per day on openrouter. */
+const ledger = (gateway: number, openrouter = 0, extra: Partial<UsageDaily["days"][number]> = {}, days = 31): Reading => ({
+  readAt: NOW,
+  value: {
+    estimate: true, basis: "", host: "h", observedAt: new Date(NOW).toISOString(), offsetMinutes: 0,
+    coverage: { scope: "", backfilled: true },
+    days: Array.from({ length: days }, (_, index) => ({
+      day: day(index), cost: gateway + openrouter, complete: true, originOnly: true, originCost: gateway + openrouter, unpricedModels: 0,
+      models: [
+        { provider: "duolingo-anthropic", model: "m", cost: gateway, coverage: "priced" as const, tokens },
+        { provider: "openrouter", model: "auto", cost: openrouter, coverage: "priced" as const, tokens },
+      ],
+      ...extra,
+    })),
     rateLimits: { source: "headers", providers: [] },
+  },
+})
+const ori = (today: number, week: number, month: number, extra: Partial<OpenRouterUsage> = {}): OriReading => ({
+  readAt: NOW,
+  value: {
+    schema: "es-openrouter-usage/1", state: "ok", observedAt: new Date(NOW).toISOString(), key_id: "0123456789abcdef",
+    credits_today_utc_usd: 0, external_byok_today_utc_usd: today,
+    credits_week_utc_usd: 0, external_byok_week_utc_usd: week,
+    credits_month_utc_usd: 0, external_byok_month_utc_usd: month,
+    ...extra,
+  },
+})
+
+describe("combineSpend", () => {
+  test("sums OpenRouter billing and each host's ledger without its openrouter rows, per UTC period", () => {
+    const result = combineSpend([laptop], { laptop: ledger(2, 50) }, { laptop: ori(100, 300, 900) }, NOW)
+    // Ledger: 2/day; 5 days since Monday; 20 days since the 1st. Openrouter rows (50/day) are the same spend as billing.
+    expect(result.periods.today).toEqual({ amount: 102, partial: false, gaps: [] })
+    expect(result.periods.week).toEqual({ amount: 310, partial: false, gaps: [] })
+    expect(result.periods.month).toEqual({ amount: 940, partial: false, gaps: [] })
   })
 
-  test("cutoff day with the same origin start on both hosts: one subtotal since that hour, raw daily never summed", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoffDay("laptop", 932.407715, "2026-10-28T15:37:35.803Z", { since: "2026-10-28T16:00:00Z", cost: 310.5, unpricedModels: 0 }), readAt: NOW },
-      mini: { value: cutoffDay("mini", 1660.150433, "2026-10-28T15:48:32.651Z", { since: "2026-10-28T16:00:00Z", cost: 420.25, unpricedModels: 0 }), readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBeUndefined()
-    expect(summary?.subtotal).toEqual({ since: Date.parse("2026-10-28T16:00:00Z"), cost: 730.75, unpriced: false,
-      hosts: [{ id: "laptop", cost: 310.5, unpriced: false }, { id: "mini", cost: 420.25, unpriced: false }] })
-    expect(summary?.partial).toBe(true)
-    expect(summary?.subtotal?.cost).not.toBe(932.407715 + 1660.150433)
+  test("Mini unreachable: the known amounts still show, partial, naming Mini", () => {
+    const result = combineSpend([laptop, mini],
+      { laptop: ledger(2), mini: { error: "HTTP 502", readAt: NOW } },
+      { laptop: ori(100, 300, 900), mini: { error: "HTTP 502", readAt: NOW } }, NOW)
+    expect(result.periods.today.amount).toBe(102)
+    expect(result.periods.today.partial).toBe(true)
+    expect(result.periods.today.gaps).toEqual(["Mini OpenRouter: HTTP 502", "Mini Core: HTTP 502"])
   })
 
-  test("different origin starts are not comparable: no subtotal", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
-      mini: { value: cutoffDay("mini", 1660, "2026-10-28T16:10:00Z", { since: "2026-10-28T17:00:00Z", cost: 400, unpricedModels: 0 }), readAt: NOW },
-    }, NOW)
-    expect(summary?.subtotal).toBeUndefined()
+  test("hosts sharing one OpenRouter key count it once, using the freshest reading", () => {
+    const older = ori(90, 290, 890, { observedAt: new Date(NOW - 60_000).toISOString() })
+    const result = combineSpend([laptop, mini], { laptop: ledger(0), mini: ledger(0) }, { laptop: ori(100, 300, 900), mini: older }, NOW)
+    expect(result.periods.today).toEqual({ amount: 100, partial: false, gaps: [] })
   })
 
-  test("a host without the partial field (pre-#264 Core) blocks the subtotal", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
-      mini: { value: cutoffDay("mini", 1660, "2026-10-28T15:48:32Z", undefined), readAt: NOW },
-    }, NOW)
-    expect(summary?.subtotal).toBeUndefined()
-    expect(summary?.gaps.map((item) => item.state)).toEqual(["tracking", "tracking"])
+  test("different keys are both counted", () => {
+    const result = combineSpend([laptop, mini], { laptop: ledger(0), mini: ledger(0) },
+      { laptop: ori(100, 300, 900), mini: ori(5, 6, 7, { key_id: "fedcba9876543210" }) }, NOW)
+    expect(result.periods.month.amount).toBe(907)
   })
 
-  test("unpriced usage inside the window is reported, and a zero subtotal stays a measured zero", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoffDay("laptop", 10, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 0, unpricedModels: 1 }), readAt: NOW },
-      mini: { value: cutoffDay("mini", 10, "2026-10-28T15:48:32Z", { since: "2026-10-28T16:00:00Z", cost: 0, unpricedModels: 0 }), readAt: NOW },
-    }, NOW)
-    expect(summary?.subtotal).toMatchObject({ cost: 0, unpriced: true })
+  test("an older dashboard: no key id is not counted beside another key; no week figure is a gap, not $0", () => {
+    const legacy = ori(5, 0, 0, { key_id: undefined, credits_week_utc_usd: undefined, external_byok_week_utc_usd: undefined })
+    const result = combineSpend([laptop, mini], { laptop: ledger(0), mini: ledger(0) }, { laptop: ori(100, 300, 900), mini: legacy }, NOW)
+    expect(result.periods.today.amount).toBe(100)
+    expect(result.periods.today.gaps).toEqual(["Mini OpenRouter: key not identified, so it may duplicate another host's; not counted"])
+    expect(result.periods.week.gaps).toEqual(["Mini OpenRouter: week to date not reported"])
   })
 
-  test("an unreachable host blocks the subtotal", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
-      mini: { error: "HTTP 503", readAt: NOW },
-    }, NOW)
-    expect(summary?.subtotal).toBeUndefined()
+  test("a lone legacy reading is counted for today and unknown for the week", () => {
+    const legacy = ori(5, 0, 0, { key_id: undefined, credits_week_utc_usd: undefined, external_byok_week_utc_usd: undefined, credits_month_utc_usd: undefined, external_byok_month_utc_usd: undefined })
+    const result = combineSpend([laptop], { laptop: { error: "HTTP 500", readAt: NOW } }, { laptop: legacy }, NOW)
+    expect(result.periods.today.amount).toBe(5)
+    expect(result.periods.week.amount).toBeUndefined()
+    expect(result.periods.month.amount).toBeUndefined()
   })
 
-  test("the next local day: both hosts whole-day origin-only give the complete total and no subtotal", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(120), readAt: NOW },
-      mini: { value: originRollup(80), readAt: NOW },
-    }, NOW)
-    expect([summary?.total, summary?.subtotal]).toEqual([200, undefined])
+  test("nothing known: no amount, never $0", () => {
+    const result = combineSpend([laptop], {}, {}, NOW)
+    expect(result.periods.today.amount).toBeUndefined()
+    expect(result.periods.today.gaps).toEqual(["Laptop OpenRouter: not read yet", "Laptop Core: not read yet"])
   })
 
-  test("an older Core without origin fields or coverage.origin stays unsupported", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(40), readAt: NOW },
-      mini: { value: olderRollup(25), readAt: NOW },
-    }, NOW)
-    expect(summary?.hosts[1]).toMatchObject({ state: "unsupported", note: "Core has no origin-only cost" })
+  test("with several hosts a day not yet split by host leaves that host out of the period", () => {
+    const result = combineSpend([laptop, mini], { laptop: ledger(2), mini: ledger(3, 0, { originOnly: false }) }, { laptop: ori(0, 0, 0) }, NOW)
+    expect(result.periods.today.amount).toBe(2)
+    expect(result.periods.today.gaps).toContain("Mini Core: some days not yet split by host")
   })
 
-  test("a host whose last read failed keeps its last origin value, still combines, and marks the summary partial", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(40), readAt: NOW },
-      mini: { value: originRollup(25), error: "HTTP 503", readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBe(65)
-    expect(summary?.partial).toBe(true)
-    expect(summary?.hosts[1]).toMatchObject({ state: "offline", cost: 25, note: "last read failed: HTTP 503" })
+  test("a Core reading from yesterday is not today's and leaves the host out", () => {
+    const stale = ledger(4)
+    stale.value!.days = stale.value!.days.slice(1)
+    const result = combineSpend([laptop], { laptop: stale }, { laptop: ori(1, 1, 1) }, NOW)
+    expect(result.periods.today.amount).toBe(1)
+    expect(result.periods.today.gaps).toEqual(["Laptop Core: last reading is for 2026-11-19"])
   })
 
-  test("a host never read (missing) leaves no combined total", () => {
-    const summary = costSummary([laptop, mini], {
-      laptop: { value: originRollup(40), readAt: NOW },
-      mini: { error: "HTTP 503", readAt: NOW },
-    }, NOW)
-    expect(summary?.total).toBeUndefined()
-    expect(summary?.gaps.map((item) => [item.label, item.state])).toEqual([["Mini", "unreachable"]])
+  test("an OpenRouter reading from last month is not this month's", () => {
+    const result = combineSpend([laptop], { laptop: ledger(0) }, { laptop: ori(1, 1, 1, { observedAt: "2026-10-31T23:59:00Z" }) }, NOW)
+    expect(result.periods.month.gaps).toEqual(["Laptop OpenRouter: last reading is from an earlier month"])
   })
 
-  test("an origin-only host with unpriced usage combines but is labelled partial", () => {
-    const summary = costSummary([laptop], {
-      laptop: { value: originRollup(40, { unpricedModels: 1 }), readAt: NOW },
-    }, NOW)
-    expect(summary?.hosts[0]).toMatchObject({ state: "partial", cost: 40, note: "some usage unpriced or not yet counted" })
-    expect(summary?.total).toBe(40)
-    expect(summary?.partial).toBe(true)
+  test("unpriced usage keeps the period partial", () => {
+    const reading = ledger(2)
+    reading.value!.days[0]!.models.push({ provider: "duolingo-openai", model: "new", cost: null, coverage: "missing-rate", tokens })
+    const result = combineSpend([laptop], { laptop: reading }, { laptop: ori(0, 0, 0) }, NOW)
+    expect(result.periods.today).toEqual({ amount: 2, partial: true, gaps: ["Laptop Core: some usage has no price"] })
+  })
+})
+
+describe("periodStart", () => {
+  test("week starts Monday 00:00 UTC, also on a Sunday and a Monday", () => {
+    expect(new Date(periodStart("week", Date.parse("2026-11-22T23:59:00Z"))).toISOString()).toBe("2026-11-16T00:00:00.000Z")
+    expect(new Date(periodStart("week", Date.parse("2026-11-23T00:00:00Z"))).toISOString()).toBe("2026-11-23T00:00:00.000Z")
   })
 
-  test("a lone WORK host on an older Core is its own total", () => {
-    const summary = costSummary([laptop], { laptop: { value: olderRollup(142), readAt: NOW } }, NOW)
-    expect(summary?.total).toBe(142)
+  test("month to date starts on the 1st; a week can span two months", () => {
+    const now = Date.parse("2026-12-02T08:00:00Z")
+    expect(new Date(periodStart("month", now)).toISOString()).toBe("2026-12-01T00:00:00.000Z")
+    expect(new Date(periodStart("week", now)).toISOString()).toBe("2026-11-30T00:00:00.000Z")
   })
 
-  test("hides the summary rather than showing $0 when no host has a priced cost", () => {
-    const summary = costSummary([laptop], {
-      laptop: { value: originRollup(0, { cost: null, originCost: null }), readAt: NOW },
-    }, NOW)
-    expect(summary).toBeUndefined()
+  test("the week spanning months reads the previous month's days from the ledger", () => {
+    const now = Date.parse("2026-12-02T08:00:00Z")
+    const reading = ledger(1)
+    reading.value!.days = reading.value!.days.map((item, index) => ({ ...item, day: new Date(Date.parse("2026-12-02T00:00:00Z") - index * 86_400_000).toISOString().slice(0, 10) }))
+    reading.value!.observedAt = new Date(now).toISOString()
+    const result = combineSpend([laptop], { laptop: reading }, { laptop: ori(0, 0, 0, { observedAt: new Date(now).toISOString() }) }, now)
+    expect(result.periods.week.amount).toBe(3)
+    expect(result.periods.month.amount).toBe(2)
   })
 })

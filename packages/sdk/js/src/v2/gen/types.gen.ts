@@ -163,6 +163,7 @@ export type SnapshotFileDiff = {
   additions: number
   deletions: number
   status?: "added" | "deleted" | "modified"
+  patchOmitted?: true
 }
 
 export type PermissionAction = "allow" | "deny" | "ask"
@@ -243,6 +244,7 @@ export type RestartContinuation = {
   reason?: "interrupted-tool" | "aborted" | "out-of-order" | "operator-recovery"
   interruptedTools: number
   time: number
+  closed?: true
 }
 
 export type NudgeMarker = {
@@ -2220,6 +2222,10 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    mcp_tool_routes?: Array<{
+      server: string
+      tool: string
+    }>
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2366,6 +2372,8 @@ export type ExperimentalCapabilities = {
   noReplyRecordOnly?: true
   session?: {
     turnTime: true
+    lastMessage?: true
+    summaryPatchBudget?: number
   }
 }
 
@@ -2554,6 +2562,33 @@ export type ProjectSummary = {
   worktree: string
 }
 
+export type SessionLastMessageSource =
+  | {
+      type: "human"
+    }
+  | {
+      type: "agent"
+      agent: string
+      providerID: string
+      modelID: string
+    }
+
+export type SessionLastMessageItem = {
+  type: "message"
+  id: string
+  role: "user" | "assistant"
+  source: SessionLastMessageSource
+  time: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  excerpt: string
+  truncated: boolean
+}
+
+export type SessionLastMessage =
+  | {
+      type: "none"
+    }
+  | SessionLastMessageItem
+
 export type GlobalSession = {
   id: string
   slug: string
@@ -2615,6 +2650,7 @@ export type GlobalSession = {
     diff?: string
   }
   project: ProjectSummary | null
+  lastMessage?: SessionLastMessage
 }
 
 export type SessionFailureError = {
@@ -2806,6 +2842,20 @@ export type McpUnsupportedOAuthError = {
 export type McpServerNotFoundError = {
   _tag: "McpServerNotFoundError"
   name: string
+  message: string
+}
+
+export type McpToolNotAllowedError = {
+  _tag: "McpToolNotAllowedError"
+  server: string
+  tool: string
+  message: string
+}
+
+export type McpToolCallError = {
+  _tag: "McpToolCallError"
+  server: string
+  tool: string
   message: string
 }
 
@@ -3018,12 +3068,15 @@ export type SessionRecoverInput = {
   text: string
   reason: string
   sender: string
+  run?: boolean
 }
 
 export type SessionRecoverResult = {
   outcome:
     | "scheduled"
+    | "closed"
     | "duplicate"
+    | "conflict"
     | "running"
     | "advanced"
     | "complete"
@@ -9960,6 +10013,47 @@ export type McpConnectResponses = {
 }
 
 export type McpConnectResponse = McpConnectResponses[keyof McpConnectResponses]
+
+export type McpToolCallData = {
+  body?: {
+    arguments?: {
+      [key: string]: unknown
+    }
+  }
+  path: {
+    name: string
+    tool: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/{name}/tool/{tool}"
+}
+
+export type McpToolCallErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * McpToolNotAllowedError
+   */
+  404: McpToolNotAllowedError
+  /**
+   * McpToolCallError
+   */
+  502: McpToolCallError
+}
+
+export type McpToolCallError2 = McpToolCallErrors[keyof McpToolCallErrors]
+
+export type McpToolCallResponses = {
+  /**
+   * The MCP tool result (CallToolResult)
+   */
+  200: unknown
+}
 
 export type McpDisconnectData = {
   body?: never

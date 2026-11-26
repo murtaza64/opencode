@@ -2,7 +2,7 @@ import { MCP } from "@/mcp"
 import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { McpServerNotFoundError } from "../errors"
+import { McpServerNotFoundError, McpToolCallError, McpToolNotAllowedError } from "../errors"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
@@ -24,6 +24,9 @@ export const AuthCallbackPayload = Schema.Struct({
 export const AuthRemoveResponse = Schema.Struct({
   success: Schema.Literal(true),
 })
+export const CallToolPayload = Schema.Struct({
+  arguments: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
 export class UnsupportedOAuthError extends Schema.ErrorClass<UnsupportedOAuthError>("McpUnsupportedOAuthError")(
   { error: Schema.String },
   { httpApiStatus: 400 },
@@ -36,6 +39,7 @@ export const McpPaths = {
   authAuthenticate: "/mcp/:name/auth/authenticate",
   connect: "/mcp/:name/connect",
   disconnect: "/mcp/:name/disconnect",
+  callTool: "/mcp/:name/tool/:tool",
 } as const
 
 export const McpApi = HttpApi.make("mcp")
@@ -123,6 +127,20 @@ export const McpApi = HttpApi.make("mcp")
           OpenApi.annotations({
             identifier: "mcp.connect",
             description: "Connect an MCP server.",
+          }),
+        ),
+        HttpApiEndpoint.post("callTool", McpPaths.callTool, {
+          params: { name: Schema.String, tool: Schema.String },
+          query: WorkspaceRoutingQuery,
+          payload: CallToolPayload,
+          success: described(Schema.Unknown, "The MCP tool result (CallToolResult)"),
+          error: [McpToolNotAllowedError, McpToolCallError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.tool.call",
+            summary: "Call an allowlisted MCP tool",
+            description:
+              "Call one MCP tool without a model turn. Only server/tool pairs listed in experimental.mcp_tool_routes are callable; anything else is not found. A tool that reports its own failure still returns 200 with `isError: true` in the result; callers must check it.",
           }),
         ),
         HttpApiEndpoint.post("disconnect", McpPaths.disconnect, {

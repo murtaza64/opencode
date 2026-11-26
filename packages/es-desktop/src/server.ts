@@ -1,4 +1,5 @@
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
+import { testInstance } from "./test-instance"
+import { createServer, request as httpRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
@@ -9,9 +10,14 @@ import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairing
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
-import { attentionRoute, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
-import type { Voice } from "./voice"
-import type { Appearance } from "./appearance"
+import { onClientGone, sendRequestBody } from "../../es-app/client-gone"
+import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
+import type { Bridge } from "./bridge"
+import type { SshPeer } from "./ssh-peer"
+import type { Transcriber, Voice, VoiceFailure } from "./voice"
+import { GLASSES_TRANSCRIBE } from "./glasses-audio"
+import { findRequest, type FindRequest, type FindResult } from "./surface-find"
+import type { Appearance, HostPalette } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
 import { createPerfLog, routeOf } from "./perf-log"
 
@@ -67,6 +73,12 @@ const proxyHeaders = (headers: IncomingHttpHeaders) =>
           "origin",
           "referer",
           "x-editspace-key",
+          // Access credentials come only from this process (bridge.ts), never from a page.
+          "cf-access-client-id",
+          "cf-access-client-secret",
+          "cf-access-token",
+          "cf-access-jwt-assertion",
+          "cf-authorization",
           "set-cookie",
           "access-control-allow-origin",
           "content-security-policy",
@@ -95,13 +107,19 @@ export const serve = async (options: {
   publicOrigin?: string
   // Native-only operator dictation; paired remote clients never reach this host's microphone.
   voice?: Voice
+  // Voice-note transcription of uploaded clips (POST /__es/voice/transcribe), for paired phones on a gateway.
+  transcriber?: Transcriber
+  glassesTranscriber?: Transcriber
   // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
   appearance?: Appearance
+  // This host's colours only (no wallpaper), for paired phones on a gateway: GET /__es/palette.
+  palette?: () => Promise<HostPalette | undefined>
   // This app release's notes and whether they were seen; one store for every listener of this app, never offered to
   // paired remote clients.
   releaseNotes?: ReleaseNotesStore
   // A remote execution host (validated tailnet origin) in place of the loopback services.
-  remote?: { id: string; origin: string }
+  // `bridge`: the host is reached through its paired gateway behind Cloudflare Access (bridge.ts).
+  remote?: { id: string; origin: string; bridge?: Bridge }
   // Local performance journal directory (renderer reports + slow proxied requests); off when unset.
   perfDir?: string
   // The hosts this listener reports to the app, read per request once every listener is up.
@@ -109,6 +127,12 @@ export const serve = async (options: {
   // Work view hosts this (local) listener reads at /hosts/<id>/...: list reads and their event
   // streams only, with no credential or cookie. Their app pages stay on their own listeners.
   peers?: { id: string; origin: string }[]
+  // Personal hosts this bridged Personal listener reads at /hosts/<id>/ over pinned SSH (ssh-peer.ts): Core list and
+  // session reads plus the pins listing, GET/HEAD only. Writes need an operator authority that does not rest on the
+  // host's loopback trust (M4), so none pass.
+  sshPeers?: { id: string; peer: SshPeer }[]
+  // Find in one Surface frame of this listener's view (surface-find.ts); native only, never for paired clients.
+  find?: (input: FindRequest) => Promise<FindResult>
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -124,8 +148,12 @@ export const serve = async (options: {
   // text only reaches that tab's draft, never the remote host.
   if (remote && (options.opencode || options.dashboard || options.opencodeAuth))
     throw new Error("A remote host listener attaches to that host only")
-  const targets = remote
-    ? { oc: remoteTargets(remote.origin).opencode, es: remoteTargets(remote.origin).dashboard }
+  const bridge = remote?.bridge
+  if (options.sshPeers?.length && !bridge) throw new Error("SSH peers attach only to a bridged listener")
+  const sshPeers = new Map((options.sshPeers ?? []).map((item) => [item.id, item.peer]))
+  const remoteUpstreams = remote && (bridge ? bridgedTargets(remote.origin) : remoteTargets(remote.origin))
+  const targets = remote && remoteUpstreams
+    ? { oc: remoteUpstreams.opencode, es: remoteUpstreams.dashboard }
     : { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
   const root = await realpath(options.root)
@@ -236,6 +264,13 @@ export const serve = async (options: {
       if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
       return appliedRoute(options.appearance, req, remote?.id ?? "local", finish)
     }
+    if (url.pathname === "/__es/find") {
+      // Native window only: the reader asks whether Surface find exists (GET) and runs it (POST, native origin).
+      if (!options.find || pairing || url.search) return finish(404, "Not found")
+      if (req.method === "GET") return finish(200, JSON.stringify({ available: true }), "application/json")
+      if (req.method !== "POST" || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return findRoute(options.find, req, finish)
+    }
     if (url.pathname === "/__es/release-notes") {
       if (!options.releaseNotes || pairing || req.method !== "GET" || url.search) return finish(404, "Not found")
       return finish(200, JSON.stringify(options.releaseNotes.read()), "application/json")
@@ -246,13 +281,20 @@ export const serve = async (options: {
       if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
       return seenRoute(options.releaseNotes, req, finish)
     }
+    if (url.pathname === "/__es/palette" && options.palette) {
+      if (req.method !== "GET" || url.search) return finish(405, "Method not allowed")
+      const palette = await options.palette().catch(() => undefined)
+      return palette ? finish(200, JSON.stringify(palette), "application/json") : finish(404, JSON.stringify({ error: "No palette on this host" }), "application/json")
+    }
     if (/^\/__es\/appearance(\/|$)/.test(url.pathname)) {
       if (!options.appearance || pairing || req.method !== "GET") return finish(404, "Not found")
       return appearanceRoute(options.appearance, req, res, url, finish)
     }
     if (url.pathname === "/__es/host") {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
-      return finish(200, JSON.stringify(options.hostInfo?.() ?? localHost), "application/json")
+      // A test instance (disposable profile) says so, so the app can label itself in every window.
+      const test = testInstance()
+      return finish(200, JSON.stringify({ ...(options.hostInfo?.() ?? localHost), ...(test ? { testInstance: test.label } : {}) }), "application/json")
     }
     if (url.pathname.startsWith("/__es/surface/")) {
       return surfaces.address(req, res)
@@ -260,6 +302,22 @@ export const serve = async (options: {
     if (url.pathname === "/__es/perf") {
       if (!perf || url.search) return finish(404, "Not found")
       return perf.receive(req, finish)
+    }
+    const glassesUpload = url.pathname === GLASSES_TRANSCRIBE
+    if (glassesUpload && (pairing || !options.glassesTranscriber)) return finish(404, "Not found")
+    if (glassesUpload && !trusted(req.headers.origin)) return finish(403, "Forbidden")
+    const transcriber = glassesUpload ? options.glassesTranscriber : url.pathname === "/__es/voice/transcribe" ? options.transcriber : undefined
+    if (transcriber) {
+      if (req.method !== "POST" || url.search) return finish(405, "Method not allowed")
+      const abort = new AbortController()
+      // The phone closing the request cancels the transcription.
+      res.once("close", () => { if (!res.writableFinished) abort.abort() })
+      const length = req.headers["content-length"] === undefined ? undefined : Number(req.headers["content-length"])
+      const result = await transcriber.transcribe({ type: req.headers["content-type"], length, body: req, signal: abort.signal }).catch((): VoiceFailure => ({ ok: false, code: "failed", message: "Couldn't transcribe the clip." }))
+      if (abort.signal.aborted) return
+      // Local paths and subprocess diagnostics do not belong on the lens.
+      const body = glassesUpload && !result.ok ? { ok: false, code: result.code, message: result.message } : result
+      return finish(result.ok ? 200 : VOICE_STATUS[result.code], JSON.stringify(body), "application/json")
     }
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
@@ -272,6 +330,18 @@ export const serve = async (options: {
     }
     if (url.pathname.startsWith("/hosts/")) {
       const qualified = hostPath(url.pathname)
+      const ssh = qualified && sshPeers.get(qualified.host)
+      if (ssh) {
+        if (!sshReadAllowed(req.method ?? "", qualified.path)) return finish(403, "Host route not exposed")
+        // The ssh child starts with the first Personal read and ends with this listener; a refused host (auth,
+        // profile) stays refused until the config changes.
+        if (ssh.reach().state === "stopped") await ssh.start()
+        const reach = ssh.reach()
+        if (reach.state !== "ready")
+          return finish(503, JSON.stringify({ error: "Host unreachable", reason: reach.state === "unreachable" ? reach.reason : "network" }), "application/json")
+        const socket = qualified.path.startsWith("/oc") ? ssh.sockets.core : ssh.sockets.dashboard
+        return sshRead(req, res, socket, `${qualified.path.slice(3) || "/"}${url.search}`, finish)
+      }
       const peer = qualified && peers.get(qualified.host)
       if (!qualified || !peer) return finish(404, "Not found")
       const upstream = `${qualified.path.startsWith("/oc") ? peer.opencode : peer.dashboard}${qualified.path.slice(3) || "/"}${url.search}`
@@ -295,6 +365,17 @@ export const serve = async (options: {
       if (write) return peerWrite(req, res, upstream, new URL(peer.opencode).origin, finish)
       return peerRead(req, res, upstream, finish)
     }
+    if (bridge && url.pathname === "/__es/bridge/pair") {
+      if (req.method !== "POST" || url.search || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return bridgePair(bridge, req, res, finish)
+    }
+    // Forget pairing (h-r N3): only from this window; nothing goes to the gateway. The page then offers pairing.
+    if (bridge && url.pathname === "/__es/bridge/forget") {
+      if (req.method !== "POST" || url.search || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      await bridge.forget().catch(() => undefined)
+      res.writeHead(303, { location: "/" })
+      return res.end()
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     // A secure decision field (dotfiles docs/es-secret-intake.md) is answered only on the computer that asked:
@@ -309,6 +390,15 @@ export const serve = async (options: {
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
     if (api && !target) return finish(503, '{"error":"Service not configured"}', "application/json")
     if (!api && !["GET", "HEAD"].includes(req.method ?? "")) return finish(405, "Method not allowed")
+    // A bridged host not yet paired (or without its service token): its API answers 401 and the page
+    // offers pairing; nothing goes upstream without both credentials.
+    if (bridge && !bridge.headers()) {
+      if (api) return finish(401, JSON.stringify({ error: bridge.configured() ? "Pairing required" : "Sign-in needed" }), "application/json")
+      if (req.headers["sec-fetch-dest"] === "document" || url.pathname === "/") {
+        res.setHeader("Content-Security-Policy", pairingCsp)
+        return finish(401, bridgePage(options.hostInfo?.().label ?? "This host", bridge.configured(), ""), "text/html; charset=utf-8")
+      }
+    }
     if (!api && (req.headers["sec-fetch-dest"] === "document" || url.pathname === "/")) {
       const ready = await Promise.all(
         [targets.oc && `${targets.oc}/experimental/capabilities`, targets.es && `${targets.es}/api/editspaces`].map(
@@ -318,7 +408,7 @@ export const serve = async (options: {
                   // A loaded Core can take seconds to answer; a stopped one refuses at once.
                   signal: AbortSignal.timeout(10_000),
                   redirect: "error",
-                  headers: index === 0 && options.opencodeAuth ? { authorization: options.opencodeAuth } : {},
+                  headers: bridge ? { ...bridge.headers(), origin: remote!.origin } : index === 0 && options.opencodeAuth ? { authorization: options.opencodeAuth } : {},
                 })
                   .then(async (response) => {
                     await response.body?.cancel()
@@ -347,7 +437,9 @@ export const serve = async (options: {
       }
       // A secure field's handle stays out of the performance journal.
       const timing = api ? perf?.proxy(req, res, secret ? "es/api/secret-intake/:handle" : `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
-      if (timing) res.on("close", () => timing.done())
+      if (timing) onClientGone(req, res, () => timing.done())
+      // The bridged credentials this request carries; a pairing refusal forgets only the cookie it actually used.
+      const credentials = bridge && api ? bridge.headers()! : undefined
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
       const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
         `${target}${api ? url.pathname.slice(api[1].length + 1) || "/" : url.pathname}${url.search}`,
@@ -362,13 +454,21 @@ export const serve = async (options: {
               ...(operatorCookie ? { cookie: operatorCookie } : {}),
             } : {}),
             ...(api?.[1] === "oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : {}),
+            // A bridged gateway checks its own public origin on every request, and needs the Access token
+            // and its pairing cookie (with the operator cookie for attention routes).
+            ...(credentials ? { ...credentials, origin: remote!.origin, cookie: [credentials.cookie, operatorCookie].filter(Boolean).join("; ") } : {}),
           },
         },
         (response) => {
           if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
             response.resume()
+            // Behind Access a redirect is the sign-in page: the token was not accepted. Never followed.
+            if (bridge) return finish(401, '{"error":"Sign-in needed"}', "application/json")
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
+          // The gateway's own pairing refusal (rotation or expiry, h-r N1): forget the stale cookie so the page
+          // offers pairing again instead of failing with 401s until a restart. Core 401s pass through unchanged.
+          if (bridge && credentials && response.statusCode === 401) return pairingRefusal(response, bridge, credentials.cookie, res, finish, setCookie)
           timing?.headers(response.statusCode)
           if (timing) response.on("data", (chunk: Buffer) => timing.data(chunk.length))
           const cookies = setCookie(response.headers["set-cookie"])
@@ -378,14 +478,19 @@ export const serve = async (options: {
         },
       )
       upstreams.add(upstream)
-      upstream.on("close", () => upstreams.delete(upstream))
+      // Bun emits a client request's "close" as soon as it is sent, so the set is cleared when the response is over.
+      // A read is freed at once; a write runs to its answer (bounded by the idle timeout below) so a prompt or a
+      // permission reply is never cut off half-applied when its page goes away (DD #921, h-r S1).
+      onClientGone(req, res, () => {
+        upstreams.delete(upstream)
+        leaveUpstream(req, upstream)
+      })
       upstream.setTimeout(api ? 15 * 60_000 : 30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
       upstream.on("error", () => {
         if (res.headersSent) return res.destroy()
         finish(502, '{"error":"Attached service unavailable"}', "application/json")
       })
-      res.on("close", () => upstream.destroy())
-      req.pipe(upstream)
+      sendRequestBody(req, upstream)
       return
     }
     const decoded = (() => {
@@ -417,7 +522,7 @@ export const serve = async (options: {
       if (!res.headersSent) finish(500, "Renderer unavailable")
       else res.destroy()
     })
-    res.on("close", () => stream.destroy())
+    onClientGone(req, res, () => stream.destroy())
     stream.pipe(res)
   })
   const mux = eventMux({
@@ -432,6 +537,11 @@ export const serve = async (options: {
       const target = targets[prefix === "/oc" ? "oc" : "es"]
       if (!target) throw new Error("Event service not configured")
       const url = `${target}${requested.pathname.slice(prefix.length)}${requested.search}`
+      if (bridge) {
+        const credentials = bridge.headers()
+        if (!credentials) throw new Error("Bridged host not paired")
+        return { url, headers: { ...credentials, origin: remote!.origin } as HeadersInit }
+      }
       // A remote dashboard trusts only its own public origin.
       if (remote) return { url, headers: { origin: remote.origin } as HeadersInit }
       return { url, headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined }
@@ -458,6 +568,7 @@ export const serve = async (options: {
       server.off("upgrade", mux.upgrade)
       mux.close()
       upstreams.forEach((upstream) => upstream.destroy())
+      await Promise.all([...sshPeers.values()].map((peer) => peer.stop()))
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
         server.closeAllConnections()
@@ -467,6 +578,19 @@ export const serve = async (options: {
 }
 
 // One read of a Work view host: no browser credential, no redirect, bounded time.
+const readOnly = (req: IncomingMessage) => req.method === "GET" || req.method === "HEAD"
+
+/** The client left. A read, or a write whose body never fully arrived, is cut at once (Core would otherwise wait on
+ * body bytes that never come). A fully sent write runs to its answer, which is then drained, never cut half-applied
+ * (DD #921, h-r #924). */
+const leaveUpstream = (req: IncomingMessage, upstream: ClientRequest) => {
+  if (readOnly(req) || !req.complete) return void upstream.destroy()
+  // Drain the answer: one already being piped to the gone client stops with it, so resume it here too.
+  const current = (upstream as ClientRequest & { res?: IncomingMessage }).res
+  if (current) current.resume()
+  else upstream.once("response", (response) => response.resume())
+}
+
 const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, finish: (status: number, body: string, type?: string) => void) => {
   const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: proxyHeaders(req.headers) }, (response) => {
     if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
@@ -482,7 +606,36 @@ const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, fin
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  res.on("close", () => upstream.destroy())
+  onClientGone(req, res, () => upstream.destroy())
+  upstream.end()
+}
+
+// The reads a pinned-SSH Personal host serves: Slice R Core reads, its editspace names (a project view scopes its
+// rows by them) and its pins listing and their events.
+const sshReadAllowed = (method: string, pathname: string) =>
+  hostApiAllowed(method, pathname) && (pathname.startsWith("/oc/") || ["/es/api/editspaces", "/es/api/pins", "/es/api/pins/events"].includes(pathname))
+
+// One read of a pinned-SSH host over its forwarded socket. The request is rebuilt: only what a read needs goes on the
+// socket (no cookie, key, authorization or cf-* header); no redirect is followed and no cookie comes back.
+const sshRead = (req: IncomingMessage, res: ServerResponse, socketPath: string, target: string, finish: (status: number, body: string, type?: string) => void) => {
+  const headers = Object.fromEntries(
+    ["accept", "last-event-id"].flatMap((name) => (typeof req.headers[name] === "string" ? [[name, req.headers[name] as string]] : [])),
+  )
+  const upstream = httpRequest({ socketPath, path: target, method: req.method, headers: { ...headers, host: "127.0.0.1" } }, (response) => {
+    if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+      response.resume()
+      return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
+    }
+    res.writeHead(response.statusCode ?? 502, proxyHeaders(response.headers))
+    response.on("error", () => res.destroy())
+    response.pipe(res)
+  })
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
+  upstream.on("error", () => {
+    if (res.headersSent) return res.destroy()
+    finish(502, '{"error":"Host unavailable"}', "application/json")
+  })
+  onClientGone(req, res, () => upstream.destroy())
   upstream.end()
 }
 
@@ -510,7 +663,8 @@ const peerWrite = (
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  res.on("close", () => upstream.destroy())
+  // A write runs to its answer (bounded by its idle timeout) even if the page leaves; it is never cut off half-applied.
+  onClientGone(req, res, () => leaveUpstream(req, upstream))
   if (body) return upstream.end(body)
   req.pipe(upstream)
 }
@@ -527,6 +681,9 @@ const readLimited = (req: IncomingMessage, limit: number) => new Promise<Buffer 
   req.on("error", () => resolve(undefined))
 })
 
+const VOICE_STATUS: Record<VoiceFailure["code"], number> = {
+  busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500, "too-large": 413, unsupported: 415,
+}
 const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const voiceRoute = async (
@@ -561,13 +718,13 @@ const voiceRoute = async (
   const id = body && typeof body === "object" && "id" in body && typeof body.id === "string" ? body.id : ""
   if (!voiceID.test(id)) return json(400, { ok: false, code: "invalid", message: "Invalid dictation id" })
   if (action === "cancel") {
-    await voice.cancel(id)
+    await voice.cancel(id, origin)
     return json(200, { ok: true })
   }
-  const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id)
+  const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id, origin)
   const status = result.ok
     ? 200
-    : ({ busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500 } as const)[result.code]
+    : VOICE_STATUS[result.code]
   return json(status, result)
 }
 
@@ -583,6 +740,23 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 const remoteOffline = (host: HostInfo | undefined) => {
   const local = host?.hosts.find((item) => item.id === "local")
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
+}
+
+const findRoute = async (find: (input: FindRequest) => Promise<FindResult>, req: IncomingMessage, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 2048) return finish(413, "Payload too large")
+  }
+  const input = findRequest((() => {
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString()) as unknown
+    } catch {
+      return undefined
+    }
+  })())
+  if (!input) return finish(400, "Invalid find request")
+  return finish(200, JSON.stringify(await find(input).catch((): FindResult => ({ state: "unavailable", reason: "blocked" }))), "application/json")
 }
 
 const seenRoute = async (notes: ReleaseNotesStore, req: IncomingMessage, finish: (status: number, body: string, type?: string) => void) => {
@@ -657,4 +831,63 @@ const appearanceRoute = (
     return
   }
   finish(404, "Not found")
+}
+
+// A bridged 401: the gateway's pairing layer answers exactly {"error":"Pairing required"}; anything else is the host's.
+const pairingRefusal = (response: IncomingMessage, bridge: Bridge, used: string, res: ServerResponse, finish: (status: number, body: string, type?: string) => void, setCookie: (values: string[] | undefined) => string[] | undefined) => {
+  const chunks: Buffer[] = []
+  let size = 0
+  response.on("data", (chunk: Buffer) => {
+    size += chunk.length
+    if (size <= 4096) chunks.push(chunk)
+  })
+  response.on("error", () => res.destroy())
+  response.on("end", async () => {
+    const body = Buffer.concat(chunks)
+    const parsed = size <= 4096 && (() => { try { return JSON.parse(body.toString("utf8")) as unknown } catch { return undefined } })()
+    if (parsed && typeof parsed === "object" && Object.keys(parsed).length === 1 && (parsed as Record<string, unknown>).error === "Pairing required") {
+      // A late refusal of a request sent before a re-pair must not drop the new pairing (h-r S1).
+      await bridge.forget(used).catch(() => undefined)
+      return finish(401, JSON.stringify({ error: "Pairing required" }), "application/json")
+    }
+    if (size > 4096) return finish(502, '{"error":"Upstream response too large"}', "application/json")
+    const cookies = setCookie(response.headers["set-cookie"])
+    res.writeHead(401, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}), "content-length": String(body.length) })
+    res.end(body)
+  })
+}
+
+// The local pairing step for a bridged host: the code goes from this page to this listener, and from
+// here only to that host's gateway (never back to the page).
+const bridgePair = async (bridge: Bridge, req: IncomingMessage, res: ServerResponse, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 1024) return finish(413, "Payload too large")
+  }
+  const code = new URLSearchParams(Buffer.concat(chunks).toString()).get("code") ?? ""
+  const result = await bridge.pair(code)
+  if (result === "paired") {
+    res.writeHead(303, { location: "/" })
+    return res.end()
+  }
+  res.setHeader("Content-Security-Policy", pairingCsp)
+  const message = {
+    "wrong-code": "That code does not match. Check it on the host and try again.",
+    throttled: "Too many attempts. Wait a minute and try again.",
+    "sign-in-needed": "This computer's access to the host was not accepted. Its service token may be missing or revoked.",
+    unreachable: "The host did not answer. Try again when it is online.",
+    unavailable: "This computer cannot store the pairing securely (no OS encryption), so it was not kept. Nothing was saved.",
+  }[result]
+  return finish(result === "wrong-code" ? 401 : 503, bridgePage("This host", true, message), "text/html; charset=utf-8")
+}
+
+const bridgePage = (label: string, configured: boolean, error: string) => {
+  const html = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="color-scheme" content="dark light"><title>Pair ${html(label)}</title>
+<style>body{font:16px/1.5 system-ui;margin:0;padding:10vh 8vw;background:Canvas;color:CanvasText}main{max-inline-size:34rem}input{font:18px ui-monospace,monospace;inline-size:100%;padding:10px;box-sizing:border-box}button{margin-block-start:12px;padding:10px 16px;font:inherit}.error{color:#d9534f}</style>
+<main><h1>Pair ${html(label)}</h1>${configured
+    ? `<p>Enter this host's pairing code (Pair a Phone on the host, or its code file). It is sent only to the host.</p>
+<form method="post" action="/__es/bridge/pair"><input name="code" dir="ltr" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus>${error ? `<p class="error" role="alert">${html(error)}</p>` : ""}<button type="submit">Pair</button></form>`
+    : `<p class="error" role="alert">Sign-in needed: this computer has no access token for the host yet. Nothing was sent to it.</p>`}</main></html>`
 }

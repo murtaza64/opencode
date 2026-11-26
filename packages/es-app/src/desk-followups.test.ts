@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { MailDelivery, MailMessage, MailTimeline } from "./api"
-import { caseLines, followUps, progressRows, type DeskCase } from "./desk-followups"
+import { actionLink, caseLines, followUps, progressRows, type DeskCase } from "./desk-followups"
 
 const delivery = (state: string): MailDelivery => ({ message_id: "x", recipient: "alpha", session: "ses_alpha", mode: "actionable", state, request_id: "r", error: null, presented_at: null, handled_at: null })
 const mail = (id: string, extra: Partial<MailMessage>): MailMessage =>
@@ -42,19 +42,20 @@ test("a case reaches the desk's context as owners, limits and read-back state, w
   expect(caseLines([])).toEqual([])
 })
 
-test("the strip puts what needs the human first, then work in progress, then results, with ids only in detail", () => {
+test("the strip puts what needs the human first, then work under way, then what waits on owners, then results, with ids only in detail", () => {
   const now = 10 * 86_400_000
   const cases = [{ case_id: "reports-and-streams", title: "Directions and streams", updated: now - 1_000,
     intents: [{ id: "private-project-directions", state: "delivered", state_at: now - 2_000, owner: { lane: "exploration", editspace: "directions", host: "mini", session: "ses_private000001" } },
-      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", next: "Pick the first workspace" }, { id: "dropped", state: "withdrawn" }],
-    deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true }] }]
+      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", needs: { action: "answer" as const, label: "Pick the first workspace", ref: "attention:streams:rec-1", host: "mini" } }, { id: "dropped", state: "withdrawn" }],
+    deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true, read_back_at: now - 1_500 }] }]
   const rows = progressRows(cases, [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: now - 5_000, delivery: "delivered" }])
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
     ["needs", "Choose scope", "Pick the first workspace"],
-    ["progress", "Which build?", "Asked alpha"],
-    ["progress", "Diff streams discovery", "native views"],
+    ["working", "Diff streams discovery", "native views"],
+    ["waiting", "Which build?", "Asked alpha"],
     ["result", "Private project directions", "Delivered"]])
   expect(rows[3]!.link).toEqual({ label: "Directions report", href: "http://127.0.0.1:1/report" })
+  expect(rows[3]!.readBackAt).toBe(now - 1_500)
   expect(rows[3]!.detail).toContain("ses_private000001")
   expect(rows.map(row => row.label).join(" ")).not.toContain("ses_")
 })
@@ -73,7 +74,96 @@ test("a part's age comes only from its own state change time, never from the cas
   expect(rows.map(row => [row.label, row.at])).toEqual([["Dated", 100], ["Undated", undefined]])
 })
 
-test("a state the desk does not recognise shows as unknown, not as in progress", () => {
+test("a state the desk does not recognise shows as unknown, not as work", () => {
   const rows = progressRows([{ case_id: "c", updated: 1, intents: [{ id: "odd", state: "paused" }, { id: "plain" }], deliverables: [] }], [])
-  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([["progress", "Plain", "In progress"], ["unknown", "Odd", "Unknown state: paused"]])
+  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([["waiting", "Plain", "Not started (requested)"], ["unknown", "Odd", "Unknown state: paused"]])
+})
+
+test("each case state lands in one group: working is work, not-yet-started and blocked parts wait on owners", () => {
+  const states = ["requested", "routed", "acknowledged", "working", "waiting", "delivered", "done", "withdrawn", "paused"]
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: states.map(state => ({ id: state, state })) }], [])
+  expect(Object.fromEntries(rows.map(row => [row.key.split("/")[1], row.group]))).toEqual({
+    requested: "waiting", routed: "waiting", acknowledged: "waiting", working: "working", waiting: "waiting", delivered: "result", done: "result", paused: "unknown" })
+})
+
+test("a question the desk asked an owner waits on that owner until answered", () => {
+  const rows = progressRows([], [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: 5, delivery: "seen" }])
+  expect(rows.map(row => [row.group, row.status])).toEqual([["waiting", "Asked alpha"]])
+})
+
+test("only a working part counts as work; a part its owner has not started waits on that owner", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [],
+    intents: [{ id: "busy", state: "working" }, { id: "asked", state: "requested" }, { id: "sent", state: "routed" }, { id: "seen", state: "acknowledged", next: "Starts after review" }] }], [])
+  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
+    ["working", "Busy", "In progress"], ["waiting", "Asked", "Not started (requested)"], ["waiting", "Sent", "Not started (routed)"], ["waiting", "Seen", "Starts after review"]])
+})
+
+test("a row names who has it and flags a blocker: an unrecognised state or a question without a delivery receipt", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [{ id: "odd", state: "paused", owner: { lane: "tour" } }, { id: "plain", state: "working" }] }],
+    [{ editspace: "p", id: "a#1", owner: "alpha", text: "No receipt", asked: 3, delivery: "unknown" }, { editspace: "p", id: "a#2", owner: "beta", text: "Bounced", asked: 2, delivery: "failed" },
+      { editspace: "p", id: "a#3", owner: "gamma", text: "Fine", asked: 1, delivery: "delivered" }])
+  expect(rows.map(row => [row.label, row.owner, row.flag])).toEqual([
+    ["Plain", undefined, undefined], ["No receipt", "alpha", "no receipt"], ["Bounced", "beta", "not delivered"], ["Fine", "gamma", undefined], ["Odd", "tour", "paused"]])
+})
+
+test("a waiting part needs the human only with a recorded action, linked on the host that holds it", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [
+    // A Laptop case pointing at the Mini's resolved review and a Mini Surface: both open on the Mini.
+    { id: "decide", state: "waiting", needs: { action: "answer", label: "Develop, revise or park?", ref: "attention:opencode:dba3c6ef-015e-482b-83fe-e9f53a74576c", host: "mini" } },
+    { id: "try-it", state: "waiting", needs: { action: "try", label: "Try the editor", ref: "surface:vim-editor", host: "mini" } },
+    { id: "local", state: "waiting", needs: { action: "review", label: "Read the board", ref: "surface:board", host: "laptop" } },
+    { id: "read", state: "waiting", needs: { action: "review", label: "Read the report", ref: "https://example.test/report" } },
+    { id: "elsewhere", state: "waiting", needs: { action: "do", label: "Plug in the TV" } },
+  ] }], [], "laptop")
+  expect(rows.map(row => [row.group, row.label, row.status, row.link])).toEqual([
+    ["needs", "Decide", "Develop, revise or park?", { label: "Answer", href: "/?item=mini~attention%3Aopencode%3Adba3c6ef-015e-482b-83fe-e9f53a74576c" }],
+    ["needs", "Try it", "Try the editor", { label: "Try it", href: "/?item=mini~surface%3Avim-editor" }],
+    ["needs", "Local", "Read the board", { label: "Review", href: "/?item=surface%3Aboard" }],
+    ["needs", "Read", "Read the report", { label: "Review", href: "https://example.test/report" }],
+    ["needs", "Elsewhere", "Plug in the TV", undefined]])
+})
+
+test("a record or Surface without a named host gets no link, never one on the viewing host", () => {
+  expect(actionLink({ action: "answer", ref: "attention:opencode:rec-1" }, "laptop")).toBeUndefined()
+  expect(actionLink({ action: "try", ref: "surface:board" }, "laptop")).toBeUndefined()
+})
+
+test("a link carrying a username or password is never offered", () => {
+  for (const ref of ["https://user:pass@example.test/", "https://user@example.test/", "https://us%65r%3Apw@example.test/", "javascript:alert(1)", "ftp://example.test/"])
+    expect(actionLink({ action: "review", ref }, "laptop")).toBeUndefined()
+  const rows = progressRows([{ case_id: "c", updated: 1, intents: [{ id: "done", state: "delivered" }],
+    deliverables: [{ id: "d", intent: "done", label: "Report", ref: "https://user:pass@example.test/r", read_back: true }] }], [])
+  expect(rows[0]!.link).toBeUndefined()
+})
+
+test("a waiting part with no recorded action is its owner's blocker, not a question for the human", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [
+    { id: "upgrade", state: "waiting", next: "client guard rejects the current target", owner: { lane: "personal-upgrade" } }, { id: "bare", state: "waiting" }] }], [])
+  expect(rows.map(row => [row.group, row.status, row.flag])).toEqual([
+    ["waiting", "Blocked: client guard rejects the current target", "blocked"], ["waiting", "Blocked; no action for you recorded", "blocked"]])
+})
+
+test("a superseded deliverable is never the strip's link and the desk is told which revision is current", () => {
+  const cases: DeskCase[] = [{ case_id: "visual", title: "G2 visual", updated: 1, intents: [{ id: "visual", state: "delivered" }],
+    deliverables: [
+      { id: "v1", intent: "visual", label: "Visual v1", ref: "https://example.test/v1", revision: "v1", read_back: true, superseded_by: "v2" },
+      { id: "v2", intent: "visual", label: "Visual-first v2", ref: "https://example.test/v2", revision: "c0b9f197", read_back: true, supersedes: "v1" }] }]
+  expect(progressRows(cases, [])[0]!.link).toEqual({ label: "Visual-first v2", href: "https://example.test/v2" })
+  const lines = caseLines(cases)
+  expect(lines).toContain("  - deliverable Visual v1 (revision v1) · SUPERSEDED by v2; do not offer or report it as current")
+  expect(lines).toContain("  - deliverable Visual-first v2 (revision c0b9f197) https://example.test/v2 · read back")
+  expect(lines.join("\n")).not.toContain("example.test/v1")
+})
+
+test("an unread newer revision leaves the strip without a link rather than falling back to the old one", () => {
+  const rows = progressRows([{ case_id: "visual", updated: 1, intents: [{ id: "visual", state: "delivered" }],
+    deliverables: [{ id: "v1", intent: "visual", label: "v1", ref: "https://example.test/v1", read_back: true, superseded_by: "v2" },
+      { id: "v2", intent: "visual", label: "v2", ref: "https://example.test/v2", supersedes: "v1" }] }], [])
+  expect(rows[0]!.link).toBeUndefined()
+})
+
+test("a case names the conversation it was asked in, so results go back there", () => {
+  const lines = caseLines([{ case_id: "visual", source_session: "ses_deskorigin01", updated: 1, intents: [], deliverables: [] }])
+  expect(lines).toContain("  asked in conversation ses_deskorigin01: results and progress go back there, not to an agent that relayed them")
+  expect(caseLines([{ case_id: "plain", updated: 1, intents: [], deliverables: [] }]).join("\n")).not.toContain("asked in conversation")
 })

@@ -909,3 +909,44 @@ it.live(
     ),
   30_000,
 )
+
+const fakeModel = (id: string) => ({
+  id, name: id, attachment: false, reasoning: false, temperature: false, tool_call: true, release_date: "2025-01-01",
+  limit: { context: 100_000, output: 10_000 }, cost: { input: 0, output: 0 }, options: {},
+})
+
+it.instance(
+  "mail admitted on a session without a model uses its agent's configured model, not the first provider's default",
+  () =>
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      // No model on the session, no history: only the agent's configured model should decide.
+      const session = yield* Session.use.create({ title: "Agent model", agent: "build" })
+      const admitted = yield* requestInDirectory(`/session/${session.id}/input`, instance.directory, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestID: "agent-model-1", delivery: "queue", text: "kickoff", source: { type: "editspace-mail", id: "m1", sender: "a", recipient: "b" } }),
+      })
+      expect(admitted.status).toBe(200)
+      const user = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const messages = yield* Session.use.messages({ sessionID: session.id })
+          return messages.find((message) => message.info.role === "user")?.info
+        }),
+        "mail was not promoted",
+      )
+      expect(user.role === "user" && user.model).toMatchObject({ providerID: "zzz-agent", modelID: "agent-model" })
+    }),
+  {
+    config: {
+      formatter: false,
+      lsp: false,
+      enabled_providers: ["aaa-default", "zzz-agent"],
+      provider: {
+        "aaa-default": { name: "A", id: "aaa-default", env: [], npm: "@ai-sdk/openai-compatible", models: { "default-model": fakeModel("default-model") }, options: { apiKey: "x", baseURL: "http://127.0.0.1:9/v1" } },
+        "zzz-agent": { name: "Z", id: "zzz-agent", env: [], npm: "@ai-sdk/openai-compatible", models: { "agent-model": fakeModel("agent-model") }, options: { apiKey: "x", baseURL: "http://127.0.0.1:9/v1" } },
+      },
+      agent: { build: { model: "zzz-agent/agent-model" } },
+    } as never,
+  },
+)

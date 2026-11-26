@@ -182,12 +182,20 @@ export const RecoverPayload = Schema.Struct({
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8000)),
   reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
   sender: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  /**
+   * `false` records the abandoned tools, closes the step and its turn, and starts nothing: no provider call, no
+   * recovery input, queued inputs untouched. `text` is still required by the schema but not admitted. A repeated
+   * close with the same `recoveryID` returns `duplicate` and settles a turn a crash left open. Default `true`.
+   */
+  run: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "SessionRecoverInput" })
 export type RecoverPayload = typeof RecoverPayload.Type
 
 export const RecoverOutcome = Schema.Literals([
   "scheduled",
+  "closed",
   "duplicate",
+  "conflict",
   "running",
   "advanced",
   "complete",
@@ -267,6 +275,7 @@ export function decideRecovery(input: {
       reason: "operator-recovery",
       interruptedTools: abandoned.length,
       time: input.now,
+      ...(input.payload.run === false ? { closed: true as const } : {}),
     },
   }
 }

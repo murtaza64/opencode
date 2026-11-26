@@ -2,7 +2,7 @@ import type { Message, RestartContinuation } from "@opencode-ai/sdk/v2"
 
 export type RestartMarker = {
   restartID: string
-  state: "resumed" | "resuming" | "uncertain"
+  state: "resumed" | "resuming" | "uncertain" | "closed"
   label: string
 }
 
@@ -28,6 +28,8 @@ function view(marker: RestartContinuation, anchor: Message, messages: readonly M
   const tools = marker.interruptedTools
     ? ` · ${marker.interruptedTools} tool${marker.interruptedTools === 1 ? "" : "s"} ${recovery ? "recorded as abandoned (effect unknown, not repeated)" : "to check"}`
     : ""
+  // A close-only recovery (run: false) started nothing, so it is neither scheduled nor stalled.
+  if (recovery && marker.closed) return { state: "closed" as const, label: `Operator recovery closed the step without running${tools}` }
   if (recovery) {
     const moved = messages.some((message) => message.role === "assistant" && message.id > anchor.id && message.time.created >= marker.time)
     return moved ? { state: "resumed" as const, label: `Operator recovery after daemon restart${tools}` }

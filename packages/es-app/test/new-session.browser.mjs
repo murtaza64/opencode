@@ -46,7 +46,9 @@ try {
   // Customise before sending: workspace, agent, model.
   await settings().getByLabel("Workspace").selectOption(lane)
   await settings().getByLabel("Agent").selectOption("build")
-  await settings().getByLabel("Model").selectOption({ label: "next" })
+  await settings().getByRole("button", { name: "Choose model" }).click()
+  await page.getByRole("combobox", { name: "Search models" }).fill("next")
+  await page.getByRole("combobox", { name: "Search models" }).press("Enter")
 
   // Known failure keeps the draft and allows another Send.
   fixture.createMode = "fail"
@@ -64,7 +66,7 @@ try {
   await expect(page.getByRole("alert")).toContainText("may have been created")
   await expect(send()).toBeDisabled()
   await expect(settings().getByLabel("Workspace")).toBeDisabled()
-  await expect(settings().getByLabel("Model")).toBeDisabled()
+  await expect(settings().getByRole("button", { name: "Choose model" })).toBeDisabled()
   const lost = createCalls().at(-1).body
   expect(lost.id).toMatch(/^ses_/)
   const afterLost = createCalls().length
@@ -72,9 +74,10 @@ try {
   await expect(page.getByRole("alert")).toContainText("Not created yet")
   expect(createCalls().length).toBe(afterLost)
   await expect(editor()).toHaveValue("Plan the migration")
-  for (const name of ["Project", "Workspace", "Agent", "Model"]) await expect(settings().getByLabel(name)).toBeDisabled()
+  for (const name of ["Project", "Workspace", "Agent"]) await expect(settings().getByLabel(name)).toBeDisabled()
+  await expect(settings().getByRole("button", { name: "Choose model" })).toBeDisabled()
   await expect(settings().getByLabel("Workspace")).toHaveValue(lane)
-  await expect(settings().getByLabel("Model")).toHaveValue("fixture\u0000next")
+  await expect(settings().getByRole("button", { name: "Choose model" })).toHaveText("Next model")
   await expect(send()).toBeEnabled()
   // The retry is lost too: still the same id, still reserved after another reload.
   fixture.createMode = "lose"
@@ -164,7 +167,7 @@ try {
   await page.getByRole("link", { name: "New session", exact: true }).click()
   await expect(page).toHaveURL(/\/new$/)
   await expect(editor()).toHaveValue("")
-  await expect(settings().getByLabel("Model")).toHaveValue("fixture\u0000next")
+  await expect(settings().getByRole("button", { name: "Choose model" })).toHaveText("Next model")
 
   // RTL and 390px: the settings row wraps and Send stays reachable.
   await page.evaluate(() => { document.documentElement.dir = "rtl" })

@@ -1,7 +1,7 @@
-// Choices that require input on the Front desk, against the disposable attention fixture: the labelled
-// control follows the selected option, Send stays disabled with the reason until the value is valid, the
-// exact value is sent once, other options stay one tap, unknown kinds are not sendable, and a ledger
-// refusal is shown with its reason. Mobile and RTL. No runtime writes.
+// Choices that require input on the Front desk, against the disposable attention fixture: every option is a button;
+// an input option's click opens its labelled control under the buttons with a Send beside it, which stays
+// disabled with the reason until the value is valid; Esc folds it and keeps the value; the exact value is sent once;
+// unknown kinds keep radio + Send and are not sendable; a ledger refusal is shown with its reason. Mobile and RTL. No runtime writes.
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
@@ -10,7 +10,7 @@ const preview = await startAttentionPreview()
 const base = preview.ledger.records[1]
 const PEOPLE = [{ id: "alice", label: "Alice R." }, { id: "bob", label: "Bob S." }, { id: "carol", label: "Carol T." }]
 const gate = (id, title, input) => ({
-  ...base, id, editspace: "fixture", title, gate_key: `fixture:${id}:v1`, lane: "work", recommendation: "name-reviewers",
+  ...base, id, editspace: "fixture", title, gate_key: `fixture:${id}:v1`, lane: "work", recommendation: null,
   options: [{ id: "name-reviewers", label: "Name reviewers", input }, { id: "arrange-myself", label: "Arrange reviews myself" }, { id: "defer", label: "Keep this queue parked" }],
 })
 preview.ledger.records.push(
@@ -39,32 +39,31 @@ try {
     const { context, card, page } = await open({ width: 1440, height: 1000 }, "cleanup")
     const reviewers = card.getByRole("textbox", { name: "Reviewers" })
     await expect(reviewers).toHaveCount(0)
-    await card.getByRole("radio", { name: "Name reviewers", exact: true }).check()
+    await expect(card.getByRole("radio")).toHaveCount(0)
+    const name = card.getByRole("button", { name: "Name reviewers", exact: true })
+    await name.click()
     await expect(reviewers).toBeVisible()
+    await expect(reviewers).toBeFocused()
     await expect(reviewers).toHaveAttribute("placeholder", "One per pair, or a pool")
-    await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
+    const send = card.getByRole("button", { name: "Send", exact: true })
+    await expect(send).toBeDisabled()
     await expect(card.locator(".home-input-problem")).toHaveText("Add reviewers to send")
-    // A note is not the required input.
-    await card.getByRole("textbox", { name: /Note \(optional\)/ }).fill("alice and bob")
-    await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
-    await card.getByRole("textbox", { name: /Note \(optional\)/ }).fill("")
     await reviewers.fill("   ")
-    await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
+    await expect(send).toBeDisabled()
     await reviewers.fill(MAPPING)
-    // Switching options swaps the requirement; other options are one tap and the typed value is kept.
-    await card.getByRole("radio", { name: "Arrange reviews myself", exact: true }).check()
+    // Esc folds the field back to its button; reopening keeps the typed value.
+    await page.keyboard.press("Escape")
     await expect(reviewers).toHaveCount(0)
     await expect(card.locator(".home-input-problem")).toHaveCount(0)
-    await expect(card.getByRole("button", { name: "Send Arrange reviews myself" })).toBeEnabled()
-    await card.getByRole("radio", { name: "Name reviewers", exact: true }).check()
+    await expect(name).toBeFocused()
+    await name.click()
     await expect(reviewers).toHaveValue(MAPPING)
-    await card.getByRole("button", { name: "Send Name reviewers" }).dblclick()
+    await send.dblclick()
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
     const [sent, ...extra] = posts("cleanup")
     if (extra.length || sent.body.choice_id !== "name-reviewers" || sent.body.input_value !== MAPPING || "text" in sent.body) throw Error(`cleanup answer ${JSON.stringify(posts("cleanup"))}`)
     // The answered request is filed in History, where it shows what was provided.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value")).toContainText("Reviewers")
     await expect(card.locator(".home-input-value bdi")).toHaveText(MAPPING)
     await context.close()
@@ -72,21 +71,20 @@ try {
   {
     // Grounded candidates: checkboxes up to max, ids sent in the order picked.
     const { context, card, page } = await open({ width: 1440, height: 1000 }, "pool")
-    await card.getByRole("radio", { name: "Name reviewers", exact: true }).check()
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
     const group = card.getByRole("group", { name: "Reviewers" })
     await group.getByRole("checkbox", { name: "Carol T." }).check()
     await group.getByRole("checkbox", { name: "Alice R." }).check()
     await group.getByRole("checkbox", { name: "Bob S." }).check()
     await expect(card.locator(".home-input-problem")).toHaveText("Pick at most 2")
-    await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
+    await expect(card.getByRole("button", { name: "Send", exact: true })).toBeDisabled()
     await group.getByRole("checkbox", { name: "Bob S." }).uncheck()
-    await card.getByRole("button", { name: "Send Name reviewers" }).click()
+    await card.getByRole("button", { name: "Send", exact: true }).click()
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
     const [sent] = posts("pool")
     if (JSON.stringify(sent.body.input_value) !== JSON.stringify(["carol", "alice"])) throw Error(`pool answer ${JSON.stringify(sent.body)}`)
     // The answered request is filed in History, where it shows what was provided.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value bdi")).toHaveText("Carol T., Alice R.")
     await context.close()
   }
@@ -109,9 +107,10 @@ try {
       delete body.input_value
       return route.continue({ postData: JSON.stringify(body) })
     })
-    await card.getByRole("radio", { name: "Name reviewers", exact: true }).check()
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
     await card.getByRole("textbox", { name: "Reviewers" }).fill("@alice")
-    await card.getByRole("button", { name: "Send Name reviewers" }).click()
+    // Enter sends a valid open field.
+    await card.getByRole("textbox", { name: "Reviewers" }).press("Enter")
     await expect(page.locator(".home-notice")).toContainText("Not sent: Reviewers is required for Name reviewers.")
     if (preview.ledger.records.find(record => record.id === "refused").status !== "open") throw Error("refused answer must leave the record open")
     await context.close()
@@ -121,7 +120,7 @@ try {
     preview.ledger.records.push(gate("mobile", "Mobile reviewers", { kind: "text", label: "Reviewers", required: true }))
     const { context, card, page } = await open({ width: 390, height: 844 }, "mobile")
     await page.evaluate(() => { document.documentElement.dir = "rtl" })
-    await card.getByRole("radio", { name: "Name reviewers", exact: true }).check()
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
     const field = card.getByRole("textbox", { name: "Reviewers" })
     await field.fill("مراجع: @alice — math-backend")
     const fit = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: window.innerWidth,
@@ -134,7 +133,7 @@ try {
   const writes = preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))
   if (writes.length) throw Error(`unexpected runtime writes ${JSON.stringify(writes)}`)
   if (errors.length) throw Error(errors.join("\n"))
-  console.log("PASS option inputs: control follows the selected option, Send disabled with reason until valid, note is not the input, value kept across switches, exact text/multi values sent once and shown after answering, max enforced, unknown kind not sendable, ledger refusal reason shown, mobile, RTL, no runtime writes")
+  console.log("PASS option inputs: every option a button, input option opens its control with Send beside it, Send disabled with reason until valid, Esc folds and keeps the value, exact text/multi values sent once and shown after answering, max enforced, unknown kind not sendable, ledger refusal reason shown, mobile, RTL, no runtime writes")
 } finally {
   await browser.close()
   await preview.close()

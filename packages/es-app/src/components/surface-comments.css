@@ -1,0 +1,187 @@
+/* On-surface comments (surface-comments.tsx). Everything sits in .surface-stage, over the frame, in frame pixels. */
+.surface-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.surface-stage > .desk-surface-frame { flex: 1; border: 0; }
+.sc-markers { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+/* A bubble's top-left corner peeking out at the anchor: rounded on three corners, square where it points. */
+.sc-peek { position: absolute; pointer-events: auto; display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0;
+  border: 2px solid var(--base, #111); border-radius: 4px 14px 14px 14px; background: var(--peach); color: var(--crust, #000);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 12%); cursor: pointer; transition: transform 120ms ease-out, box-shadow 120ms ease-out; }
+.sc-peek:hover, .sc-peek:focus-visible { transform: scale(1.12); box-shadow: 0 4px 14px rgb(0 0 0 / 55%), 0 0 0 2px var(--peach); outline: none; }
+.sc-peek-face { font-size: 12px; font-weight: 700; line-height: 1; }
+.sc-peek-count { position: absolute; inset-block-start: -7px; inset-inline-end: -8px; min-inline-size: 16px; block-size: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--base, #111); color: var(--text); font-size: 10px; line-height: 16px; text-align: center; box-shadow: 0 0 0 1px var(--surface1); }
+.sc-peek[data-changed] { background: var(--yellow); }
+.sc-peek[data-status=sending] { opacity: .7; } .sc-peek[data-status=failed] { background: var(--red); }
+.sc-peek.sc-ping { transform: scale(1.25); box-shadow: 0 0 0 3px var(--peach), 0 8px 18px rgb(0 0 0 / 30%); }
+/* At rest: an element comment is its pip, outside the part's corner; the ring appears while the thread is hovered,
+ * focused or pinged from the finder. A point comment is a small pin, tip on the spot. */
+/* An element pip is small enough for a page's usual 24px gutter. */
+.sc-peek:not(.sc-pin) { box-sizing: border-box; inline-size: 22px; block-size: 22px; border-width: 1px; border-radius: 3px 11px 11px 11px; }
+.sc-peek:not(.sc-pin) .sc-peek-face { font-size: 10px; }
+/* Touch keeps a 38px target around the small pip or pin. */
+@media (pointer: coarse) { .sc-peek::before { content: ""; position: absolute; inset: -8px; } }
+.sc-rest-ring { position: absolute; border-radius: 4px; box-shadow: 0 0 0 1px var(--peach); pointer-events: none; opacity: 0; transition: opacity 120ms ease-out; }
+.sc-peek:hover + .sc-rest-ring, .sc-peek:focus-visible + .sc-rest-ring, .sc-peek.sc-ping + .sc-rest-ring { opacity: 1; }
+.sc-peek.sc-pin { inline-size: 22px; block-size: 27px; border: 0; border-radius: 11px 11px 11px 2px; transform-origin: 50% 100%; clip-path: path("M11 27 C11 27 0 16 0 10 A11 10 0 0 1 22 10 C22 16 11 27 11 27 Z"); box-shadow: none; opacity: .85; }
+.sc-peek.sc-pin .sc-peek-face { margin-block-end: 7px; font-size: 10px; }
+.sc-peek.sc-pin .sc-peek-count { display: none; }
+.sc-peek.sc-pin:hover, .sc-peek.sc-pin:focus-visible, .sc-peek.sc-pin.sc-ping { transform: scale(1.12); box-shadow: none; opacity: 1; }
+.sc-peek.sc-pin:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; clip-path: none; border-radius: 11px; }
+/* The open card shows a point comment's pin at full strength inside its ring. */
+.sc-spot { position: absolute; inline-size: 22px; block-size: 27px; margin: -27px 0 0 -11px; background: var(--peach); clip-path: path("M11 27 C11 27 0 16 0 10 A11 10 0 0 1 22 10 C22 16 11 27 11 27 Z"); pointer-events: none; }
+.sc-spot::after { content: ""; position: absolute; left: 8px; top: 7px; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--crust, #000); }
+/* Focus: the anchor stays sharp inside a ring; everything around it dims and blurs. */
+.sc-focus { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.sc-veil { position: absolute; inset: 0; pointer-events: none; background: rgb(17 20 24 / 22%); backdrop-filter: blur(2.5px); -webkit-backdrop-filter: blur(2.5px); }
+.sc-ring { position: absolute; border-radius: 6px; box-shadow: 0 0 0 2px var(--peach), 0 0 24px rgb(250 179 135 / 25%); pointer-events: none; }
+.sc-card { position: absolute; inline-size: min(360px, calc(100% - 16px)); max-block-size: min(60vh, 460px); overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 12px; box-sizing: border-box;
+  border-radius: 4px 14px 14px 14px; background: var(--base, #111); border: 1px solid var(--surface1); box-shadow: 0 16px 48px rgb(0 0 0 / 55%); animation: sc-rise 180ms ease-out; pointer-events: auto; }
+.sc-card:not([data-below]) { border-radius: 14px 14px 14px 4px; }
+.sc-card[data-away] { inline-size: min(400px, calc(100% - 16px)); }
+.sc-card-nav { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); }
+.sc-card-nav > span:first-child { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sc-card-nav button { inline-size: 25px; block-size: 25px; border: 0; border-radius: 6px; background: none; color: var(--subtext1); cursor: pointer; font-size: 20px; }
+.sc-card-nav button:hover { background: var(--surface1); }
+.sc-away { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--subtext0); }
+.sc-away-tag { border-radius: 4px; padding: 2px 5px; background: var(--surface1); color: var(--yellow); font-weight: 700; }
+.sc-away blockquote { flex-basis: 100%; margin: 0; padding: 6px 10px; border-inline-start: 3px solid var(--surface1); overflow-wrap: anywhere; }
+@keyframes sc-rise { from { opacity: 0; transform: translateY(4px); } }
+.sc-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+/* Only the thread scrolls: the note, sending state, receipt and reply box keep their place at the card's foot. */
+.sc-card > * { flex: none; }
+.sc-card > .sc-thread { flex: 0 1 auto; min-block-size: 48px; overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+.sc-comment { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.sc-face { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; border-radius: 4px 12px 12px 12px; background: var(--peach); color: var(--crust, #000); font-size: 11px; font-weight: 700; }
+.sc-comment-head { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.sc-body { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; }
+.sc-dim-text { color: var(--subtext0); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+.sc-note { margin: 0; font-size: 12px; color: var(--yellow); }
+.sc-out { padding: 6px 8px; border-radius: 6px; background: var(--surface0); display: grid; gap: 4px; }
+.sc-out[data-state=failed] { box-shadow: inset 2px 0 0 var(--red); }
+.sc-failed { color: var(--red); font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.sc-receipt { margin: 0; font-size: 11px; color: var(--subtext0); display: flex; gap: 4px; align-items: center; }
+.sc-compose { display: grid; gap: 6px; }
+.sc-compose textarea { inline-size: 100%; box-sizing: border-box; resize: vertical; min-block-size: 44px; padding: 6px 8px; border: 1px solid var(--surface1); border-radius: 6px; background: var(--mantle); color: var(--text); font: inherit; font-size: 13px; }
+.sc-compose textarea:focus { outline: none; border-color: var(--peach); }
+.sc-compose-row { display: flex; align-items: center; gap: 8px; } .sc-compose-row .sc-dim-text { margin-inline-end: auto; }
+.sc-send, .sc-chat-send { padding: 3px 12px; border: 1px solid var(--peach); border-radius: 5px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
+.sc-send:disabled, .sc-chat-send:disabled { opacity: .45; }
+.sc-text-button { padding: 2px 4px; border: 0; background: none; color: var(--subtext1); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+/* A fixed-size row; the finder and drawing shapes grow above it. */
+.sc-toolbar { position: absolute; inset-block-end: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px; padding: 5px;
+  border-radius: 14px; background: color-mix(in srgb, var(--base, #111) 94%, transparent); border: 1px solid var(--surface1); box-shadow: 0 12px 30px rgb(0 0 0 / 30%); transition: transform .2s, opacity .2s; }
+.sc-toolbar[data-tucked] { transform: translate(-50%, 90px); opacity: 0; pointer-events: none; }
+.sc-toolbar[data-picking] { border-color: var(--peach); }
+.sc-toolbar button { flex: none; inline-size: 34px; block-size: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--subtext1); cursor: pointer; font-size: 23px; }
+.sc-toolbar button:hover, .sc-toolbar button[aria-expanded=true] { background: var(--surface1); color: var(--text); }
+.sc-toolbar button[aria-pressed=true]:not([aria-label="Hide comments (H)"]) { background: var(--peach); color: var(--crust, #000); }
+.sc-toolbar button.sc-tool-mic { color: var(--yellow); }
+.sc-toolbar button.sc-tool-mic:hover { background: var(--surface1); color: var(--yellow); }
+/* Recording: the mic shows REC and the elapsed time, red, until clicked again. */
+.sc-toolbar button.sc-tool-mic[data-state=recording] { inline-size: auto; padding: 0 8px; background: color-mix(in srgb, var(--red) 22%, transparent); color: var(--red); }
+.sc-toolbar button.sc-tool-mic[data-state=transcribing] { opacity: .6; }
+.sc-rec { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-rec svg { inline-size: 16px; block-size: 16px; }
+.sc-rec i { inline-size: 8px; block-size: 8px; border-radius: 50%; background: currentColor; animation: sc-rec 1s ease-in-out infinite; }
+@keyframes sc-rec { 50% { opacity: .3; } }
+.sc-toolbar button.sc-tool-chat { position: relative; }
+.sc-chat-unread { position: absolute; inset-block-start: -4px; inset-inline-end: -4px; min-inline-size: 16px; block-size: 16px; padding: 0 4px; border-radius: 8px; background: var(--red); color: var(--crust, #000); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+/* The chat pop: bottom-right, above the toolbar's row, never over the toolbar. */
+.sc-chat { position: absolute; inset-inline-end: 12px; bottom: 69px; z-index: 6; display: flex; flex-direction: column; inline-size: min(360px, calc(100% - 24px)); block-size: min(440px, calc(100% - 81px)); box-sizing: border-box; border: 1px solid var(--surface1); border-radius: 14px; background: var(--base); color: var(--text); box-shadow: 0 20px 50px rgb(0 0 0 / 35%); overflow: hidden; }
+.sc-chat.sc-chat-min { display: none; }
+.sc-chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 10px; border-block-end: 1px solid var(--surface0); font-size: 13px; }
+.sc-chat-avatar { flex: none; display: grid; place-items: center; inline-size: 26px; block-size: 26px; overflow: hidden; border-radius: 8px; background: var(--peach); color: var(--crust); font-weight: 700; font-size: 12px; }
+.sc-chat-avatar img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.sc-chat-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-chat-full { flex: none; font-size: 12px; color: var(--blue); }
+.sc-toolbar .sc-chat-icon, .sc-chat-icon { flex: none; inline-size: 26px; block-size: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--subtext0); font-size: 16px; line-height: 1; cursor: pointer; }
+.sc-chat-icon:hover, .sc-chat-icon:focus-visible { background: var(--surface0); color: var(--text); }
+.sc-chat-body { flex: 1; min-block-size: 0; overflow-y: auto; overflow-anchor: none; display: grid; align-content: start; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.sc-chat-content { display: grid; align-content: start; gap: 10px; min-inline-size: 0; }
+.sc-chat-empty { margin: 8px 0; color: var(--subtext0); font-size: 12px; }
+.sc-chat-msg { display: grid; gap: 3px; max-inline-size: 90%; }
+.sc-chat-msg[data-role=user] { justify-self: end; padding: 6px 10px; border-radius: 12px 12px 4px 12px; background: var(--surface0); }
+.sc-chat-msg[data-role=assistant] { justify-self: start; }
+.sc-chat-msg p { margin: 0; }
+.sc-chat-msg :is(h1, h2, h3) { font-size: 13px; margin: 4px 0; }
+.sc-chat-meta { display: flex; justify-content: flex-end; gap: 6px; font-size: 10px; color: var(--subtext0); }
+.sc-chat-tick[data-state=replied] { color: var(--green); }
+.sc-chat-chip { display: inline-block; padding: 1px 7px; border-radius: 30px; background: var(--surface0); color: var(--subtext1); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 100%; }
+.sc-chat-working { margin: 0; color: var(--subtext0); font-size: 12px; }
+.sc-chat-working span { letter-spacing: 2px; animation: sc-rec 1.2s ease-in-out infinite; }
+.sc-chat-compose { display: grid; gap: 6px; padding: 8px 10px 10px; border-block-start: 1px solid var(--surface0); }
+.sc-chat-compose .sc-chat-chip { justify-self: start; }
+.sc-chat-compose textarea { box-sizing: border-box; inline-size: 100%; resize: none; padding: 6px 8px; border: 1px solid var(--surface1); border-radius: 8px; background: var(--crust, #000); color: var(--text); font: inherit; font-size: 13px; }
+.sc-chat-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.sc-chat-bubble { position: absolute; inset-inline-end: 16px; bottom: 69px; z-index: 6; display: grid; place-items: center; inline-size: 44px; block-size: 44px; padding: 0; border: 1px solid var(--surface1); border-radius: 50%; background: var(--base); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: pointer; }
+.sc-chat-bubble .sc-chat-avatar { inline-size: 32px; block-size: 32px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) { .sc-rec i, .sc-chat-working span { animation: none; } }
+.sc-toolbar button[aria-label="Hide comments (H)"][aria-pressed=false] { opacity: .5; }
+.sc-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
+.sc-toolbar svg:not(.glyph) { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sc-toolbar i { inline-size: 1px; block-size: 20px; background: var(--surface2); margin: 0 4px; }
+.sc-toolbar .sc-count { inline-size: 52px; display: flex; justify-content: center; gap: 4px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-off-count { font-size: 10px; color: var(--yellow); }
+.sc-draw { position: relative; display: inline-flex; }
+.sc-fly { position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 6px); display: grid; gap: 2px; padding: 4px; border-radius: 12px; background: var(--base, #111); opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; }
+.sc-fly::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+.sc-draw:hover .sc-fly:not([aria-hidden=true]), .sc-draw:focus-within .sc-fly:not([aria-hidden=true]) { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-comment[data-open] .sc-fly { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-toolbar .sc-fly-comment button { inline-size: auto; min-inline-size: 104px; display: flex; justify-content: flex-start; gap: 8px; padding: 0 10px; font-size: 13px; }
+.sc-fly-comment button span { inline-size: 16px; text-align: center; font-size: 15px; }
+.sc-fly-comment button b { font-weight: 600; }
+.sc-tray-row .sc-row-where { display: block; margin-block-start: 2px; color: var(--subtext0); font-size: 11px; }
+/* Drawings sit under the markers' layer, half strength at rest; the open thread's and the draft are full. */
+.sc-drawings { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: visible; }
+.sc-drawing { opacity: .5; transition: opacity 120ms ease-out; }
+.sc-drawing[data-open], .sc-drawing.sc-draft { opacity: 1; }
+.sc-draw-layer { position: absolute; inset: 0; z-index: 4; cursor: crosshair; touch-action: none; }
+.sc-draw-tool[data-open] .sc-fly:not([aria-hidden=true]) { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-toolbar .sc-fly-draw button { inline-size: auto; min-inline-size: 96px; display: flex; justify-content: flex-start; gap: 8px; padding: 0 10px; font-size: 13px; }
+.sc-fly-draw button span { inline-size: 16px; text-align: center; font-size: 15px; }
+.sc-fly-draw button b { font-weight: 600; }
+.sc-tool-glyph { font-size: 17px; line-height: 1; }
+.sc-mark-line { margin: 0; font-size: 12px; color: var(--subtext1); }
+.sc-mark-line b { color: var(--text); }
+.sc-tab { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 5; border: 0; border-radius: 10px 10px 0 0; padding: 3px 10px; background: var(--base, #111); color: var(--text); cursor: pointer; }
+.sc-tray { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 5; inline-size: min(460px, calc(100% - 24px)); max-block-size: min(60vh, 560px); display: flex; flex-direction: column; background: var(--base, #111); color: var(--text); border: 1px solid var(--surface1); border-radius: 14px; box-shadow: 0 20px 50px rgb(0 0 0 / 35%); font-size: 13px; }
+.sc-tray-filters { display: flex; align-items: center; gap: 8px; padding: 10px 10px 6px; }
+.sc-tray-filters input { flex: 1; min-inline-size: 0; background: var(--surface0); color: var(--text); border: 0; border-radius: 9px; padding: 7px 10px; }
+.sc-segments { display: inline-flex; gap: 2px; background: var(--surface0); border-radius: 9px; padding: 3px; }
+.sc-segments button { border: 0; border-radius: 7px; padding: 4px 7px; background: none; color: var(--subtext1); text-transform: capitalize; cursor: pointer; }
+.sc-segments button[aria-pressed=true] { background: var(--surface2); color: var(--text); }
+.sc-authors { display: flex; gap: 5px; padding: 0 10px 6px; }
+.sc-authors button { border: 0; border-radius: 50%; inline-size: 24px; block-size: 24px; background: var(--peach); color: var(--crust); opacity: .55; cursor: pointer; }
+.sc-authors button[aria-pressed=true] { opacity: 1; outline: 2px solid var(--blue); }
+.sc-tray-list { overflow-y: auto; padding: 0 6px 8px; }
+.sc-group h3 { position: sticky; top: 0; z-index: 1; margin: 0; background: var(--base); color: var(--subtext0); padding: 8px 8px 4px; font-size: 11px; }
+.sc-tray-row { display: block; inline-size: 100%; border: 0; border-radius: 9px; padding: 7px 8px; text-align: start; background: none; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.sc-tray-row:hover { background: var(--surface0); }
+.sc-empty { margin: 12px; color: var(--subtext0); }
+@media (prefers-reduced-motion: reduce) {
+  .sc-veil { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(17 20 24 / 32%); }
+  .sc-card { animation: none; } .sc-peek, .sc-toolbar, .sc-fly { transition: none; }
+}
+@media (max-width: 600px) {
+  .sc-toolbar { bottom: 8px; padding: 4px; gap: 0; }
+  .sc-toolbar button { inline-size: 30px; block-size: 32px; }
+  .sc-toolbar .sc-count { inline-size: 42px; }
+  .sc-toolbar i { margin: 0 2px; }
+  .sc-tray { bottom: 60px; }
+  .sc-tray-filters { flex-wrap: wrap; }
+  .sc-peek { inline-size: 32px; block-size: 32px; }
+  .sc-card { inline-size: min(360px, calc(100% - 16px)); }
+}
+/* A "Look at" place revealed on click (DD #753): one soft outline pulse, then gone. */
+.sc-look-pulse { position: absolute; pointer-events: none; border-radius: 6px; box-shadow: 0 0 0 2px var(--blue), 0 0 0 6px color-mix(in srgb, var(--blue) 25%, transparent); animation: sc-look-pulse 1.6s ease-out forwards; }
+@keyframes sc-look-pulse { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sc-look-pulse { animation: none; opacity: 1; } }
+/* The transcript components at chat size: the reader's own colours, no copy/meta chrome (the full chat has those). */
+.sc-chat-msg [data-component="user-message"], .sc-chat-msg [data-slot="user-message-body"], .sc-chat-msg [data-slot="user-message-text"] { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; max-inline-size: none; }
+.sc-chat-msg :is([data-slot="user-message-text"], [data-component="markdown"], [data-component="text-part"]) { color: var(--text); font-size: 13px; line-height: 1.45; }
+.sc-chat-msg [data-component="markdown"] :is(p, ul, ol) { margin: 0 0 4px; }
+.sc-chat-msg :is([data-slot="user-message-copy-wrapper"], [data-slot="text-part-copy-wrapper"]) { display: none; }
+
+/* The micro chat's history cap: older matches live in the full chat. */
+.sc-chat-earlier { align-self: center; margin: 2px 0 4px; padding: 2px 6px; border: 0; background: none; color: var(--blue); font: inherit; font-size: 11px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sc-chat-earlier:hover, .sc-chat-earlier:focus-visible { color: var(--text); }

@@ -5,7 +5,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { A, useLocation } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
-import { sessionHref, useDashboard, type DotState, type SessionRow } from "../state"
+import { ago, sessionHref, useDashboard, type DotState, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
@@ -23,10 +23,14 @@ import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
 import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
 import { host } from "../host"
+import { personas } from "../desk-identity"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
+import { TestInstanceBadge } from "./native-header"
 import { waveStart } from "../wave"
-import { NavTabs, NeedsYouBand } from "./nav-tabs"
+import { UnifiedSidebar, type RecentAgent } from "./nav-tabs"
+import { clockTime } from "../local-time"
+import { focusRing } from "../dom-marks"
 
 /** Project scope for browsing (the same dashboard scope New session targets): a chip in the Agents filter row
  * that opens a short list of projects. Escape or choosing closes it and returns focus to the chip. */
@@ -53,8 +57,79 @@ export const ProjectScope = (props: { onChange?: () => void }) => {
   </details>
 }
 
+/** The Agents tab's one Filter control: a popover with hosts, project, status and sort. Choices apply at once; Clear
+ * restores the defaults; Escape or Done closes it and returns focus to the control. */
+const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: string }[]; shownHost: (id: string) => boolean; toggleHost: (id: string) => void; hostCount: (id: string) => number
+  activeOnly: boolean; setActiveOnly: (value: boolean) => void; sortBy: S; setSortBy: (value: S) => void; sorts: readonly (readonly [S, string])[]; onScope?: () => void }) => {
+  const { state, editspace, setEditspace, editspaces, allProjects, setAllProjects } = useDashboard()
+  const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
+  let menu: HTMLDetailsElement | undefined
+  const close = () => { menu!.open = false; menu!.querySelector("summary")?.focus() }
+  // The panel exists only while open: Chrome keeps a closed <details>' content laid out (content-visibility), so a
+  // mounted panel would still read as an open dialog to anything that counts dialogs by their boxes.
+  const [shown, setShown] = createSignal(false)
+  const hidden = () => props.hosts.filter((item) => !props.shownHost(item.id)).length
+  // Each choice that differs from the default view counts once.
+  // The window's default project is the default scope; only another project counts.
+  const projectChanged = () => !allProjects() && current() !== (editspaces()?.default ?? state()?.editspace)
+  const changed = () => (projectChanged() ? 1 : 0) + (hidden() ? 1 : 0) + (props.activeOnly ? 1 : 0) + (props.sortBy === props.sorts[0][0] ? 0 : 1)
+  const summary = () => [projectChanged() ? current() : undefined, hidden() ? `${props.hosts.length - hidden()} of ${props.hosts.length} hosts` : undefined,
+    props.activeOnly ? "working now" : undefined, props.sortBy === props.sorts[0][0] ? undefined : `by ${props.sorts.find(([value]) => value === props.sortBy)?.[1].toLowerCase()}`].filter(Boolean).join(", ")
+  const clear = () => {
+    if (projectChanged()) { props.onScope?.(); setEditspace(editspaces()?.default ?? state()?.editspace ?? current()) }
+    props.hosts.filter((item) => !props.shownHost(item.id)).forEach((item) => props.toggleHost(item.id))
+    props.setActiveOnly(false)
+    props.setSortBy(props.sorts[0][0])
+  }
+  return <details class="sidebar-filter" ref={menu} onToggle={(event) => setShown(event.currentTarget.open)} onKeyDown={(event) => { if (event.key === "Escape" && menu!.open) { event.preventDefault(); event.stopPropagation(); close() } }}>
+    <summary class="agent-filter" aria-label={changed() ? `Filter and sort: ${summary()}` : "Filter and sort"} title={changed() ? summary() : "Filter and sort"}>
+      <Glyph name="filter" /><Show when={changed()} fallback={<span class="sr-only">Filter</span>}><span class="sidebar-filter-count">{changed()}</span></Show>
+    </summary>
+    <Show when={shown()}><div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
+      <Show when={props.hosts.length > 1}>
+        <fieldset class="sidebar-filter-list"><legend>Hosts</legend><For each={props.hosts}>{(item) =>
+          <label data-checked={props.shownHost(item.id) ? "" : undefined}><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} {...focusRing} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
+      </Show>
+      <fieldset class="sidebar-filter-list" data-single><legend>Project</legend>
+        <label data-checked={allProjects() ? "" : undefined}><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} {...focusRing} /><span>All projects</span></label>
+        <For each={editspaces()?.editspaces ?? []}>{(item) =>
+          <label data-checked={!allProjects() && current() === item.name ? "" : undefined}><input type="radio" name="sidebar-project" checked={!allProjects() && current() === item.name} onChange={() => { props.onScope?.(); setEditspace(item.name) }} {...focusRing} /><bdi dir="auto">{item.name}</bdi></label>}</For>
+      </fieldset>
+      <fieldset class="sidebar-filter-segments"><legend>Show</legend>
+        <label data-checked={!props.activeOnly ? "" : undefined}><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} {...focusRing} /><span>All agents</span></label>
+        <label data-checked={props.activeOnly ? "" : undefined}><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} {...focusRing} /><span>Working now</span></label>
+      </fieldset>
+      <fieldset class="sidebar-filter-segments"><legend>Sort</legend><For each={props.sorts}>{([value, label]) =>
+        <label data-checked={props.sortBy === value ? "" : undefined}><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} {...focusRing} /><span>{label}</span></label>}</For></fieldset>
+      <div class="sidebar-filter-actions"><button type="button" disabled={!changed()} onClick={clear}>Clear</button><button type="button" class="sidebar-filter-done" onClick={close}>Done</button></div>
+    </div>
+    </Show>
+  </details>
+}
+
 // Day headings come from the row's last turn boundary only (turn-order.ts); unknown is Undated, never Today.
 const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yesterday", week: "This week", older: "Older", undated: "Undated" }
+
+// The round agent shape in the unified list; the persona avatar is used when the registry has one.
+const initialOf = (text: string) => [...text.trim()][0]?.toLocaleUpperCase() ?? "?"
+
+const AgentAvatar = (props: { row: SessionRow }) => {
+  const [failed, setFailed] = createSignal<string>()
+  const source = () => {
+    if (host()?.profile === "personal") return
+    const lane = /\/lanes\/([^/]+)/.exec(props.row.directory)?.[1]
+    const entries = personas()
+    const value = entries.find(person => lane && person.owner_lane === `${props.row.project}/${lane}`)?.avatar_url
+      ?? entries.find(person => person.name === props.row.title)?.avatar_url
+    if (!value || value === failed()) return
+    if (/^https:\/\//.test(value) || /^\/(?!\/)[^\\]+$/.test(value)) return value
+  }
+  return <span class="session-avatar" aria-hidden="true">
+    <Show when={source()} fallback={initialOf(props.row.title || props.row.id)}>{(url) =>
+      <img src={url()} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(url())} />}
+    </Show>
+  </span>
+}
 
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
@@ -125,7 +200,10 @@ export default function Sidebar() {
     const rest = allPinned().filter((other) => hostRowKey(other) !== hostRowKey(row))
     const from = allPinned().findIndex((other) => hostRowKey(other) === hostRowKey(row))
     if (from === to) return
-    if (!movePin(row, rest[to - 1], rest[to])) note(`Can't reorder ${row.title || row.id} now: ${feedOf(row)?.host.label ?? "its host"} is not synced. Nothing changed.`)
+    if (movePin(row, rest[to - 1], rest[to])) return
+    const host = feedOf(row)?.host
+    note(host?.readOnly ? `Can't reorder ${row.title || row.id} here: pins on ${host.label} are changed on that host. Nothing changed.`
+      : `Can't reorder ${row.title || row.id} now: ${host?.label ?? "its host"} is not synced. Nothing changed.`)
   }
   // Rows may be rebuilt when the order changes (the move lands when the owning host answers): for a few seconds after
   // a keyboard move, a rebuilt row gets its focus back, unless focus has moved elsewhere meanwhile.
@@ -218,6 +296,9 @@ export default function Sidebar() {
   })
   // Shown rows: the activity order above, or by name (stable ties by key); active-only keeps the live bucket.
   const createdOf = (row: { kind: string; item: unknown }) => row.kind === "session" ? (row.item as SessionRow).created : undefined
+  // Rows the Filter control hides (hosts, working now), so a short filtered list is not read as the whole list.
+  const filteredOut = createMemo(() => allUnpinned().filter((item) => !shownHost(item.host ?? ownHost().id)).length + (activeOnly() ? agentRows().filter((row) => !row.live).length : 0))
+  const clearFilters = () => { workHosts().filter((item) => !shownHost(item.id)).forEach((item) => toggleHost(item.id)); setActiveOnly(false) }
   const shownRows = createMemo(() => {
     const rows = activeOnly() ? agentRows().filter((row) => row.live) : agentRows()
     if (sortBy() === "name") return [...rows].sort((a, b) => (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key))
@@ -243,7 +324,7 @@ export default function Sidebar() {
     return { text: behind.length ? `${count}+` : count ? String(count) : "",
       title: `${count} working now${behind.length ? `; ${behind.join(", ")} not current` : ""}` }
   })
-  const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const clock = (time: number) => clockTime(time)
   const dotText = (s: SessionRow, dot: DotState) => {
     const failure = dot === "failed" ? failures.failure(s.id) : undefined
     return failure ? `failed: ${failureLabel(failure)}` : dot
@@ -288,6 +369,33 @@ export default function Sidebar() {
   // hover/focus insight card delegates from whichever nav is mounted
   const [navEl, setNavEl] = createSignal<HTMLElement>()
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
+
+  // Rows for the unified sidebar's Recent list: the same agent rows the Agents view renders, offered
+  // with the data the blend needs. Cloud agents count as agents; nothing else is invented.
+  const recentAgents = createMemo((): RecentAgent[] => agentRows().flatMap((row) => {
+    if (row.kind === "cloud") {
+      const pin = cloudPin(row.item)
+      if (!pin) return []
+      return [{ key: `wingman:${row.item.key}`, title: pin.lane, updated: row.item.changedAt, active: row.item.status.chip === "busy",
+        node: <CloudNav pin={pin} />,
+        preview: { kind: "Agent", title: pin.lane, agent: pin.lane, owner: pin.editspace, host: "Wingman", meta: row.item.status.chip } }]
+    }
+    const s = row.item
+    const feed = s.host ? feedOf(s) : undefined
+    const state = s.host ? work.dot(s) : dotFor(s)
+    return [{
+      key: hostRowKey(s),
+      title: s.title || s.id,
+      updated: s.turnAt ?? s.updated,
+      // Running now: a turn in progress, or waiting on a permission or question (the same status stream as the dot).
+      active: state === "busy" || state === "pending",
+      node: item(s),
+      preview: { kind: "Agent", title: s.title || s.id, agent: s.title || s.id,
+        owner: s.host ? `on ${feed?.host.label ?? s.host}` : `in ${s.project ?? current()}`,
+        host: s.host ? feed?.host.label ?? s.host : ownHost().label,
+        meta: [state, s.directory].filter(Boolean).join(" · ") },
+    }]
+  }))
 
   // Titles filter immediately; transcript search starts at three characters.
   const [query, setQuery] = createSignal("")
@@ -401,7 +509,11 @@ export default function Sidebar() {
       <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
     </a>
   ) : (
-    <div class="session-entry" {...peekAttrs(s)}>
+    <div class="session-entry" {...peekAttrs(s)} data-active={isOpen(s) ? "" : undefined}
+      data-nav-key={hostRowKey(s)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
+      data-preview-agent={s.title || s.id} data-preview-owner={`in ${s.project ?? current()}`} data-preview-host={ownHost().label}
+      data-preview-meta={[dotText(s, dot()), s.directory].filter(Boolean).join(" · ")}>
+      <AgentAvatar row={s} />
       <a
         ref={(el) => observeSession(el, s.id)}
         href={sessionHref(s.id, s.directory)}
@@ -414,6 +526,9 @@ export default function Sidebar() {
         <span class="nav-title" dir="auto">{s.title || s.id}</span>
         <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
         <Show when={hosted()}><span class="sr-only">, on Local</span></Show>
+        <span class="row-secondary">{[dotText(s, dot()), s.project, s.directory].filter(Boolean).join(" · ")}</span>
+        <span class="row-trailing" aria-hidden="true">
+          <Show when={(s.turnAt ?? s.updated) > 1e12}><time>{ago(s.turnAt ?? s.updated)}</time></Show></span>
       </a>
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -443,7 +558,12 @@ export default function Sidebar() {
       return { id: edge.successor, title: row?.title || edge.successor, directory: row?.directory ?? s.directory }
     }
     return (
-    <div class="session-entry host-entry" classList={{ unavailable: down() }}>
+    <div class="session-entry host-entry" classList={{ unavailable: down() }} data-active={isOpen(s) ? "" : undefined}
+      data-handed-off={feed && handedOff() ? "" : undefined}
+      data-nav-key={hostRowKey(s)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
+      data-preview-agent={s.title || s.id} data-preview-owner={`on ${label()}`} data-preview-host={label()}
+      data-preview-meta={[dot(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}>
+      <AgentAvatar row={s} />
       <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" classList={{ active: isOpen(s) }}
         aria-current={isOpen(s) ? "page" : undefined} aria-label={name()} aria-disabled={down() || undefined}
         title={down() ? `${label()} · unreachable since ${clock(feed?.state().since ?? Date.now())}; last-known list, actions disabled` : `${s.title || s.id} — on ${label()}`}
@@ -451,10 +571,14 @@ export default function Sidebar() {
         <StatusDot state={dot()} label={`${label()}: ${dot()}`} />
         <HostGlyph host={s.host!} />
         <span class="nav-title" dir="auto">{s.title || s.id}</span>
+        <span class="row-secondary">{[label(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}</span>
+        <span class="row-trailing" aria-hidden="true"><span class="host-tile" title={label()}>{[...label()][0]}</span>
+          <Show when={(s.turnAt ?? s.updated) > 1e12}><time>{ago(s.turnAt ?? s.updated)}</time></Show></span>
       </a>
-      <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }}
+      {/* A read-only host's pins are listed here but changed only on that host. */}
+      <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }} disabled={feed?.host.readOnly}
         aria-label={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id} on ${label()}`}
-        title={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        title={feed?.host.readOnly ? `${work.isPinned(s) ? "Pinned" : "Not pinned"} on ${label()}; change pins on that host` : `${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
       <Show when={feed && handedOff()}>{(next) => <a class="handoff-next-link" href={hostSessionHref(feed!.host, next())}
         title={`Handed off to ${next().title} on ${label()}`} aria-label={`${s.title || s.id} handed off to ${next().title} on ${label()}`}>
@@ -475,6 +599,19 @@ export default function Sidebar() {
       </div>
     </Show>
   }
+
+  // Host load status, shared by the Agents view and the Recent list: cached rows stay; a host that is
+  // loading, unreachable or empty says so in place, never as a silent gap.
+  const statuses = () => <>
+    <Show when={hosted()}>
+      <Show when={localUnavailable() || (!unpinnedSessions().length && !pinnedSessions().length && !sessionsLoading())}>
+        <div class="dim nav-empty host-status" classList={{ unavailable: localUnavailable() }} role="status"><HostGlyph host="local" />
+          <span>Local · {localUnavailable() ? "unavailable — retrying" : allProjects() ? "no sessions" : `no ${current()} sessions`}</span></div>
+      </Show>
+      <For each={work.feeds()}>{hostStatus}</For>
+    </Show>
+    <CloudSource />
+  </>
 
   const miniItem = (s: SessionRow) => {
     if (s.host) {
@@ -531,13 +668,10 @@ export default function Sidebar() {
       }
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
-        <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}<TodayCost /></div></Show>
-        {/* Unified nav (dotfiles#240): primary entries, then what needs you (never filtered by a tab), then
-          * Pinned (any kind), then four browse tabs with their own filters. */}
+        <Show when={!nativeHeader}><div class="sidebar-top"><TestInstanceBadge />{projectControls()}<TodayCost /></div></Show>
+        {/* Unified nav (dotfiles#240): primary entries, then Pinned, then one list that opens with what
+          * needs you and continues with Recent (agents, Surfaces and closed decisions blended). */}
         <NavEntries />
-        {/* Explicit requests only (attention records, permissions, questions, delivered requests). A finished or idle
-          * agent is activity: its row's status dot and order in Agents show it, never a Needs you row. */}
-        <NeedsYouBand />
         <Show when={allPinned().length || cloud.pins().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned<span class="sr-only">; reorder a row with Alt+Up or Alt+Down</span>
@@ -563,36 +697,16 @@ export default function Sidebar() {
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
-        <NavTabs agentsCount={activeCount()} agents={<>
-          <div class="agent-filters" role="group" aria-label="Agents view">
-            <ProjectScope onChange={clearSearch} />
-            <button type="button" class="agent-filter" aria-pressed={activeOnly()} title="Show only agents working now" onClick={() => setActiveOnly(!activeOnly())}>Active</button>
-            <button type="button" class="agent-filter agent-sort" title={`${SORT_TITLE[sortBy()]}. Click for ${SORT_LABEL[SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length]].toLowerCase()}.`}
-              aria-label={`Sort: ${SORT_LABEL[sortBy()].toLowerCase()}`} onClick={() => setSortBy(SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length])}>
-              <span aria-hidden="true">⇅</span> {SORT_LABEL[sortBy()]}
-            </button>
+        <UnifiedSidebar agentsCount={activeCount()} recentAgents={recentAgents()} searching={!!query().trim()} statuses={statuses()} toolbar={
+          /* One row: New, Search, and one Filter control. Host, project, status and sort live in its popover;
+            * the control's count says how many differ from the defaults. */
+          <div class="agent-toolbar" role="group" aria-label="Agents view">
             <NewSession inline />
-          </div>
-          <Show when={hosted() && host()?.profile !== "personal"}>
-            <div class="work-hosts" role="group" aria-label="Work hosts">
-              <span class="work-hosts-label">Work</span>
-              <For each={workHosts()}>{(item) =>
-                <button type="button" class="work-host" aria-pressed={shownHost(item.id)} title={shownHost(item.id) ? `Hide ${item.label} sessions` : `Show ${item.label} sessions`}
-                  onClick={() => toggleHost(item.id)}>
-                  <HostGlyph host={item.id} /><span>{item.label}</span><span class="work-host-count">{hostCount(item.id) || ""}</span>
-                </button>}</For>
-            </div>
-          </Show>
-        <div class="search-box">
-          <input
-            class="search-input"
-            type="search"
-            placeholder="search sessions…"
-            value={query()}
-            onInput={(e) => onQuery(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Escape" && clearSearch()}
-          />
-        </div>
+            <input class="search-input" type="search" placeholder="Search" aria-label="Search sessions" value={query()}
+              onInput={(e) => onQuery(e.currentTarget.value)} onKeyDown={(e) => e.key === "Escape" && clearSearch()} />
+            <SidebarFilter hosts={hosted() && host()?.profile !== "personal" ? workHosts() : []} shownHost={shownHost} toggleHost={toggleHost} hostCount={hostCount}
+              activeOnly={activeOnly()} setActiveOnly={setActiveOnly} sortBy={sortBy()} setSortBy={setSortBy} sorts={SORTS.map((value) => [value, SORT_LABEL[value]] as const)} onScope={clearSearch} />
+          </div>} agents={<>
         <Show
           when={!query().trim()}
           fallback={
@@ -617,14 +731,7 @@ export default function Sidebar() {
           }
         >
           {/* Cached rows stay; load trouble is the header's shared status, not a list banner. */}
-          <Show when={hosted()}>
-            <Show when={localUnavailable() || (!unpinnedSessions().length && !pinnedSessions().length && !sessionsLoading())}>
-              <div class="dim nav-empty host-status" classList={{ unavailable: localUnavailable() }} role="status"><HostGlyph host="local" />
-                <span>Local · {localUnavailable() ? "unavailable — retrying" : allProjects() ? "no sessions" : `no ${current()} sessions`}</span></div>
-            </Show>
-            <For each={work.feeds()}>{hostStatus}</For>
-          </Show>
-          <CloudSource />
+          {statuses()}
           <Show when={shownRows().length} fallback={
             <Show when={!hosted() || activeOnly()}><div class="dim nav-empty">{activeOnly() ? "No agents working now" : sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
           }>
@@ -650,6 +757,7 @@ export default function Sidebar() {
               }}
             </For>
           </Show>
+          <Show when={filteredOut()}><div class="filtered-out" role="status"><span>{filteredOut()} hidden by filters</span> · <button type="button" class="desk-link-button" onClick={clearFilters}>Clear</button></div></Show>
           <Show when={archived().length}>
             <button class="archived-toggle" onClick={() => setShowArchived(!showArchived())}>
               {showArchived() ? "▾" : "▸"} archived ({archived().length})

@@ -1,0 +1,14 @@
+{
+  "schema": "es-appearance-receipt/1",
+  "consumed": {
+    "transfer": "personal-appearance:33333333333333333333333333333333",
+    "sha256": "1b17c1fb355ca0d6cc969be97a9baea6e1774c51e2c3f838198a8d7fd31e7b52",
+    "paletteDigest": "c922ea4026fbd7a5fd90df70683d0722a8b24cef57a2059e349be27c7d912572",
+    "identity": "5cac1ed8ae7da6527775db095cc9fd1f4f512d7748c2bf64bcefe576fba221c9"
+  },
+  "wallpaper": "/__es/appearance/wallpaper?v=5cac1ed8ae7da6527775db095cc9fd1f",
+  "background": "#1a0b2e",
+  "foreground": "#f0e6ff",
+  "updatedAt": 1793540000000,
+  "applied": []
+}

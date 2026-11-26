@@ -10,3 +10,7 @@
 .kbd-overlay-note { margin: 10px 0 0; font-size: 11px; color: var(--subtext0); }
 .kbd-which-key { position: fixed; inset-block-end: 16px; inset-inline-end: 16px; z-index: 60; display: grid; gap: 2px; min-inline-size: 200px; padding: 8px 10px; border: 1px solid var(--surface0); border-radius: 6px; background: var(--base); color: var(--text); font-size: 12px; }
 .kbd-which-key-prefix { color: var(--subtext0); }
+/* "f"/"F" hint labels: small tags beside each target's inline-start edge; typed letters dim. */
+.kbd-hints { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+.kbd-hint { position: fixed; padding: 1px; border-radius: 2px; background: var(--yellow); color: var(--crust); font: 600 11px/14px var(--font-mono, ui-monospace, monospace); text-transform: uppercase; box-shadow: 0 0 0 1px var(--crust); }
+.kbd-hint b { font-weight: 600; opacity: 0.45; }

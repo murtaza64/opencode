@@ -209,6 +209,36 @@ describe("UsageRollup", () => {
     }),
   )
 
+  it.effect("a west-of-UTC today keeps its spend across 00:00 UTC and rolls over at local midnight", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* db.update(UsageRollupStateTable).set({ time_backfilled: 1 }).run()
+      // US Eastern (UTC-5): local Nov 3 runs 05:00Z Nov 3 to 05:00Z Nov 4.
+      yield* db
+        .insert(UsageHourlyTable)
+        .values([
+          { hour: Date.UTC(2026, 10, 3, 23) / HOUR, session_id: "ses_t", provider_id: "anthropic", model_id: "opus", cost: 2, tokens_input: 1 },
+        ])
+        .run()
+      const day = (now: number, offsetMinutes: number) =>
+        UsageRollup.daily(db, { days: 1, offsetMinutes, now }).pipe(Effect.map((result) => [result.days[0]?.day, result.days[0]?.cost]))
+      expect(yield* day(Date.UTC(2026, 10, 3, 23, 59), -300)).toEqual(["2026-11-03", 2])
+      // Spend in the first UTC hour of Nov 4 still belongs to local Nov 3.
+      yield* db
+        .insert(UsageHourlyTable)
+        .values([
+          { hour: Date.UTC(2026, 10, 4, 0) / HOUR, session_id: "ses_t", provider_id: "anthropic", model_id: "opus", cost: 3, tokens_input: 1 },
+          { hour: Date.UTC(2026, 10, 4, 5) / HOUR, session_id: "ses_t", provider_id: "anthropic", model_id: "opus", cost: 7, tokens_input: 1 },
+        ])
+        .run()
+      expect(yield* day(Date.UTC(2026, 10, 4, 0, 30), -300)).toEqual(["2026-11-03", 5])
+      expect(yield* day(Date.UTC(2026, 10, 4, 4, 59), -300)).toEqual(["2026-11-03", 5])
+      expect(yield* day(Date.UTC(2026, 10, 4, 5, 0), -300)).toEqual(["2026-11-04", 7])
+      // A host at UTC+1 reports its own local day: Nov 4 there runs 23:00Z Nov 3 to 23:00Z Nov 4.
+      expect(yield* day(Date.UTC(2026, 10, 4, 0, 30), 60)).toEqual(["2026-11-04", 12])
+    }),
+  )
+
   it.effect("usage without a known rate is reported as unpriced, never as zero cost", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

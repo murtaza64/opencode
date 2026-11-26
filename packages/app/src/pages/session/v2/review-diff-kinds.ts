@@ -2,6 +2,7 @@ import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import type { Kind } from "@/components/file-tree-v2"
 import { normalizeFileTreeV2Path } from "@/components/file-tree-v2-model"
+import { normalize } from "@opencode-ai/session-ui/session-diff"
 
 export type RenderDiff = FileDiffInfo | (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -16,6 +17,34 @@ export function filterRenderableDiff(value: FileDiffInfo | SnapshotFileDiff | Vc
 export function reviewDiffNeedsLoad(diff: RenderDiff) {
   if (diff.additions === 0 && diff.deletions === 0) return false
   return !diff.patch || !/^@@ /m.test(diff.patch)
+}
+
+/**
+ * The rebuilt patch for a turn-summary row whose patch Core omitted inline (`patchOmitted`), taken from
+ * `GET /session/:sessionID/diff?messageID=`. A rebuilt diff with other status or counts describes a different turn
+ * range, so the row stays omitted rather than showing a patch that does not match its counts.
+ */
+export function turnReviewDiff(source: RenderDiff, rebuilt: readonly SnapshotFileDiff[]): RenderDiff | undefined {
+  if (!("patchOmitted" in source) || source.patchOmitted !== true) return
+  const hit = rebuilt.find((diff) => diff.file === source.file)
+  if (!hit?.patch || hit.patchOmitted) return
+  if (hit.additions !== source.additions || hit.deletions !== source.deletions || hit.status !== source.status) return
+  const { patchOmitted: _, ...metadata } = source
+  return { ...metadata, patch: hit.patch }
+}
+
+/**
+ * Cache key part for a turn's rebuilt diff: changes whenever the turn summary does, so a running turn's refreshed
+ * counts fetch again instead of matching against a stale rebuild.
+ */
+export function turnSummaryVersion(diffs: readonly SnapshotFileDiff[]) {
+  return diffs.reduce((key, diff) => `${key}|${diff.file}:${diff.status}:${diff.additions}:${diff.deletions}`, `${diffs.length}`)
+}
+
+/** What a turn-diff row renders: the patch, or nothing when Core omitted it (the caller shows a notice). */
+export function turnDiffView(diff: RenderDiff) {
+  const view = normalize(diff)
+  return view.omitted ? undefined : view
 }
 
 export function reviewRootDirectory(root: string) {

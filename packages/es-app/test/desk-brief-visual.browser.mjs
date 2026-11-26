@@ -278,8 +278,8 @@ try {
       const asks = []
       page.on("request", request => { if (request.method() === "POST" && request.url().includes("/prompt_async")) asks.push(JSON.parse(request.postData())) })
       await card.getByRole("button", { name: "More detail" }).click()
-      await card.getByRole("textbox", { name: "Question for the front desk (optional)" }).fill("Why only writes?")
-      await card.getByRole("button", { name: "Ask" }).click()
+      await card.getByRole("textbox", { name: "Question for Porter (optional)" }).fill("Why only writes?")
+      await card.getByRole("button", { name: "Ask", exact: true }).click()
       await expect(card.locator(".desk-more")).toContainText("Asked in the chat.")
       assert.equal(asks.length, 1)
       assert.equal(asks[0].parts[0].text, `More detail: ${probe.title}\n\nWhy only writes?`)
@@ -306,7 +306,8 @@ try {
       await expect(bubbles.nth(1).locator(".desk-bubble-text")).toHaveText("seems legit enough; check if true and fix")
       await expect(bubbles.nth(1).locator("a.desk-bubble-who")).toHaveAttribute("href", "https://github.com/acme/etl-loader/pull/143#discussion_r4351575820")
       await expect(bubbles.nth(1).locator(".desk-bubble-text a")).toHaveCount(0)
-      // The note is always an open text box; no agent-speak after the recipient.
+      // A recommended choice starts selected with the note behind "Add a note"; no agent-speak after the recipient.
+      if (await card.locator(".home-add-note").count()) await card.locator(".home-add-note").click()
       await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible()
       await expect(card.locator(".home-answer")).not.toContainText("tool approval")
       await expect(card.locator(".home-sends blockquote")).toHaveText(DRAFT)

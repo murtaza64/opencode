@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Index, Match, Show, Switch, type Compone
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
+import { fileReference } from "../api"
 import { mailActionableStatus, mailActivityLabel, mailChipWake, mailSentAt, mailWake, mailWakeLabel } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { ChatImages } from "./chat-images"
@@ -9,9 +10,11 @@ import { toolOutcome, type Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { iconEligible, ToolChip, ToolStrip } from "./tool-run"
+import { dateTime } from "../local-time"
+import { markParent } from "../dom-marks"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
-const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
+const mailTime = (value: string | number | null) => dateTime(value)
 
 // The legacy SDK message type has no source field yet. Only structured wire
 // metadata can identify mail; message text and synthetic parts cannot.
@@ -52,9 +55,13 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       !props.parts.every(part => part.type === "text" && part.synthetic === true)) return ""
     return props.parts.flatMap(part => part.type === "text" && !part.ignored && part.text.trim() ? [part.text] : []).join("\n\n")
   })
+  // A desk succession seeds its successor with the predecessor's brief; it reads as the same desk continuing.
+  const handoff = createMemo(() => !!generated() && props.parts.some(part => part.type === "text" &&
+    part.metadata?.source === "front-desk/succession"))
   // Attached user images render through ChatImages, the same component as the outgoing bubble.
   const imagePart = (part: ComponentProps<typeof Message>["parts"][number]) => props.message.role === "user" &&
-    part.type === "file" && part.mime.startsWith("image/") && part.url.startsWith("data:") && part.source?.text?.start === undefined
+    part.type === "file" && part.mime.startsWith("image/") && (part.url.startsWith("data:") || fileReference(part.url)) &&
+    part.source?.text?.start === undefined
   const images = createMemo(() => props.parts.flatMap(part => imagePart(part) && part.type === "file"
     ? [{ url: part.url, mime: part.mime, ...(part.filename ? { filename: part.filename } : {}) }] : []),
   [], { equals: (a, b) => a.length === b.length && a.every((image, index) => image.url === b[index]!.url && image.filename === b[index]!.filename) })
@@ -86,14 +93,24 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
           fallback={<Parts {...props} parts={parts()} />}>{(key) => props.renderRun?.(key)}</Show>
       }}</Index>
     }</Show>
-    <Show when={messageError()}>{(error) =>
-      <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
-    }</Show>
+    <Show when={messageError()}>{(error) => {
+      // One short cause, then the provider's own words behind Details. Text only (never markup), control codes and
+      // ANSI escapes removed, and bounded so a provider dump cannot flood the transcript.
+      const full = errorText(error()).replace(/\u001b\[[0-9;]*m/g, "").trim().slice(0, 4000)
+      const cause = (full.split(/\n/).find(line => line.trim()) ?? "The model provider returned an error").replace(/\s+/g, " ").trim().slice(0, 180)
+      return <details class="conversation-error" data-message-error-id={props.message.id} aria-label="Provider error">
+        <summary><span class="conversation-error-cause" dir="auto">{cause}</span><span class="conversation-error-details">Details</span></summary>
+        <div class="conversation-error-detail" dir="auto" tabIndex={0} role="region" aria-label="Provider error details">{full || cause}</div>
+      </details>
+    }}</Show>
   </>}>
-    <details class="generated-input" data-generated-message-id={props.message.id} onToggle={event => setOpen(event.currentTarget.open)}>
+    <details class="generated-input" data-generated-message-id={props.message.id} data-self-handoff={handoff() || undefined}
+      onToggle={event => setOpen(event.currentTarget.open)}>
       <summary class="activity-row">
-        <span class="activity-kind">Generated input</span>
-        <span class="activity-description" dir="auto">{generated().replace(/\s+/g, " ").trim().slice(0, 200)}</span>
+        <span class="activity-kind">{handoff() ? "Self-handoff" : "Generated input"}</span>
+        <span class="activity-description" dir="auto">{handoff()
+          ? "Continued from an earlier conversation · brief"
+          : generated().replace(/\s+/g, " ").trim().slice(0, 200)}</span>
         <span class="activity-disclosure" aria-hidden="true">›</span>
       </summary>
       <Show when={open()}>
@@ -104,7 +121,8 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       </Show>
     </details>
   </Show>}>
-    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in">
+    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in"
+      ref={(el) => markParent(() => el, ".msg-wrap", "mail-activity")}>
       {/* Mail that reached this session as input is incoming, whoever sent it. */}
       <MailSummary id={metadata().mail.id} direction="in"
         party={<MailSender from={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}

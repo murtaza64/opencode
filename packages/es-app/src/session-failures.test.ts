@@ -337,6 +337,13 @@ test("an unknown normal Send or unresolved admission saved for a session blocks 
   expect(unresolvedSend("ses_x", "/repo", store({ normalSubmission: { status: "accepted", text: "t", images: 0 } }))).toBe("")
 })
 
+test("an unknown Send to the same session on another Work host is read from that host's composer state only", () => {
+  const mini = { id: "mini", base: "/hosts/mini/oc" }
+  const store = () => ({ getItem: (key: string) => key.includes('"mini"') ? JSON.stringify({ normalSubmission: { status: "unknown", text: "t", images: 0 } }) : JSON.stringify({}) })
+  expect(unresolvedSend("ses_x", "/repo", store, mini)).toContain("unknown")
+  expect(unresolvedSend("ses_x", "/repo", store)).toBe("")
+})
+
 test("a session with no saved composer state can be retried", () => {
   expect(unresolvedSend("ses_x", "/repo", () => ({ getItem: () => null }))).toBe("")
   expect(unresolvedSend("ses_x", "/repo", () => null)).toBe("")

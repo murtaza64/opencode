@@ -19,6 +19,24 @@ beforeEach(() => {
 })
 afterEach(() => fetchSpy.mockRestore())
 
+// Pages are compact; Core's server-relative file references are rewritten to this app's /oc proxy.
+test("pages ask for compact parts and point file references at /oc", async () => {
+  fetchSpy.mockImplementation(async (input) => {
+    calls.push({ url: String(input) })
+    return Response.json([{ info: { id: "msg_1" }, parts: [
+      { type: "file", url: "/session/ses_f/message/msg_1/part/prt_1/file?bytes=30000" },
+      { type: "file", url: "data:image/png;base64,AAAA" },
+      { type: "tool", state: { status: "completed", attachments: [{ url: "/session/ses_f/message/msg_1/part/prt_2/attachment/0" }] } },
+    ] }])
+  })
+  const page = await oc.messagesPage("ses_f", "/repo", 80)
+  expect(calls[0]!.url).toContain("&compact=true")
+  const parts = page.items[0]!.parts as { url?: string; state?: { attachments: { url: string }[] } }[]
+  expect(parts[0]!.url).toBe("/oc/session/ses_f/message/msg_1/part/prt_1/file?bytes=30000")
+  expect(parts[1]!.url).toBe("data:image/png;base64,AAAA")
+  expect(parts[2]!.state!.attachments[0]!.url).toBe("/oc/session/ses_f/message/msg_1/part/prt_2/attachment/0")
+})
+
 test("concurrent reads of one session tail share a single request; each caller gets its own copy", async () => {
   const page = oc.messagesPage("ses_a", "/repo", 80)
   const tail = oc.messagesTail("ses_a", "/repo", 20)

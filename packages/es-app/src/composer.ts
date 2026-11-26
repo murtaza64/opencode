@@ -15,6 +15,7 @@ import { composerStorage } from "./composer-storage"
 import type { ContextPart } from "./api"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
+import { accessState, whenSignedIn } from "./access-auth"
 import { perfEvent } from "./perf-telemetry"
 import type { SessionHost } from "./session-host"
 
@@ -216,10 +217,11 @@ export const unresolvedSend = (
   directory: string,
   storage: () => Pick<Storage, "getItem"> | null = () =>
     typeof window === "undefined" ? null : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage),
+  host?: SessionHost,
 ) => {
-  const live = controllers.get(storageKey(sessionID, directory))
+  const live = controllers.get(storageKey(sessionID, directory, host))
   if (live?.restoreError()) return "Saved composer state could not be restored. Check the conversation first."
-  const saved = live ? undefined : readSubmission(storage, storageKey(sessionID, directory))
+  const saved = live ? undefined : readSubmission(storage, storageKey(sessionID, directory, host))
   if (saved === "unreadable") return "Saved composer state is unreadable. Open the session and check the conversation first."
   const submission = live ? live.state.normalSubmission : saved?.normalSubmission
   if (live?.state.sending || submission?.status === "sending") return "A message is still being sent."
@@ -1256,6 +1258,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (draft.images.length) await persistAsync()
       else persist()
       clearTask(draft.revision, buffer, direct?.targetRevision)
+      if (accessState() !== "ok") await whenSignedIn()
       try {
         await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, {
           images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}),
@@ -1304,8 +1307,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     tracked.add(admission.payload.requestID)
     setState("admission", admission)
+    // The editor clears as soon as the input is captured: saving an exact image copy can take seconds, and
+    // the outgoing bubble already shows it. The saved snapshot keeps the draft until that write lands.
+    clearTask(admission.revision, buffer, direct?.targetRevision)
     if (!(images ? await persistAsync() : persist()) && images) {
       tracked.delete(admission.payload.requestID)
+      restoreSubmitted(buffer, draft)
       setState({
         admission: null,
         sending: false,
@@ -1314,7 +1321,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       return
     }
-    clearTask(admission.revision, buffer, direct?.targetRevision)
+    // Behind an expired Access session the input waits (editor cleared, bubble shown) and goes once sign-in is back.
+    if (accessState() !== "ok") await whenSignedIn()
     await admit(admission)
     // An unanswered input moves to the set-aside list (same request ID, checked on every refresh),
     // so it never blocks the next message.

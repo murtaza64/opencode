@@ -1,4 +1,5 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { pageHidden } from "./page-visible"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 
 export type AttentionRecord = {
@@ -14,13 +15,18 @@ export type AttentionRecord = {
   context: string
   options: AttentionOption[]
   /** Review items only: the one thing to try, at its exact revision. */
-  artifact?: { title: string; url: string; revision: string } | null
+  /** What the record asks about: a web link, or a Surface on the record's own dashboard (attention-lead #504). */
+  artifact?: ({ title: string; revision: string | number } & ({ url: string; surface?: undefined } | { surface: string; url?: undefined })) | null
+  /** Meeting-brief routing (attention-lead ltrpotzl, front-desk producer): what each item does and who it goes to. */
+  routing?: { source?: { kind: string; title?: string; at?: number } | null; items: RoutingItem[] } | null
   recommendation?: string | null
   producer_session: string
   origin_session: string
   gate_key: string
   /** A question in a series from one producer origin (attention S5): stable index, gaps allowed. */
   series?: { id: string; index: number; title?: string } | null
+  /** Proposed publisher field (grilling seam, not yet in the ledger): the series question whose answer prompted this one. */
+  caused_by?: { index: number } | null
   source_ref: { session_id: string; directory: string }
   decision: { choice_id: string; label?: string } | string | null
   delivery_state: DeliveryState
@@ -57,6 +63,32 @@ export type OptionInput = {
   fields?: { id: string; label: string }[]
 }
 export type AttentionOption = { id: string; label: string; input?: OptionInput }
+/** `update`: factual, within the recipient's existing authorized work; sent only after an answer that says so, no
+ * toggle. `proposal` (new work for `to`) and `desk-action` (the Desk itself acts) each need their toggle. */
+export type RoutingItem = {
+  id: string
+  kind: "update" | "proposal" | "desk-action"
+  /** `<editspace>/<lane>` or `<host>:<editspace>/<lane>`; absent for a desk action. */
+  to?: string
+  summary: string
+  recommended?: boolean
+  /** Never preselected. */
+  sensitive?: boolean
+}
+
+/** A record answered by toggling routing items: its items, the option whose multi input picks proposals and desk
+ * actions, the other options, and the picks that start on (recommended, never sensitive). Undefined when the record has
+ * no routing or no option collects its items, so older cards render as before. */
+export const routingBrief = (record: AttentionRecord) => {
+  const items = record.routing?.items
+  if (!items?.length) return
+  const pickable = items.filter(item => item.kind !== "update")
+  const apply = record.options.find(option => option.input?.kind === "multi" && (option.input.choices ?? []).every(choice => pickable.some(item => item.id === choice.id)))
+  if (!apply) return
+  const offered = new Set((apply.input?.choices ?? []).map(choice => choice.id))
+  return { items, apply, offered, other: record.options.filter(option => option.id !== apply.id), picks: pickable.filter(item => offered.has(item.id) && item.recommended && !item.sensitive).map(item => item.id) }
+}
+
 export type InputValue = string | string[]
 export const INPUT_KINDS = ["text", "choice", "multi", "secret"]
 
@@ -256,12 +288,12 @@ export const createAttention = (project: () => string | undefined, options: { re
   }
   onMount(() => {
     if (options.readOnly) {
-      const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+      const timer = setInterval(() => { if (pageHidden()) return; setNow(Date.now()); void refresh() }, 30_000)
       onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
       return
     }
     if (!options.deferOperator) activate()
-    const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+    const timer = setInterval(() => { if (pageHidden()) return; setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
   })
   createEffect(() => { project(); options.enabled?.(); void refresh() })

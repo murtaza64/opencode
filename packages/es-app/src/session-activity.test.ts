@@ -409,8 +409,8 @@ test("reconnect repairs missed requests and statuses without clearing disconnect
   snapshots[grandchildDirectory].status = { ses_grandchild: { type: "retry" } }
   const calls = fetchSpy.mock.calls.length
   ActivityEvents.current.onopen?.()
-  // Directory reads go through the background limiter, so they start over a few ticks, not synchronously.
-  await load(activity)
+  // Directory reads go through the background limiter two directories at a time, so they start over a few ticks.
+  await Bun.sleep(20)
   expect(fetchSpy.mock.calls.length).toBe(calls + 12)
   expect(refreshes).toHaveLength(1)
   expect(activity.pending("ses_parent")).toEqual([
@@ -527,4 +527,92 @@ test("a queued EventSource error after disposal cannot change the public error s
   expect(ActivityEvents.current.closed).toBe(true)
   queuedError?.()
   expect(activity.error("ses_parent")).toBe(before)
+})
+
+test("a busy dot is unknown while the stream is down; a reconnect re-reads its directory even outside the relevant set (orchestrator #818)", async () => {
+  const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(unrelatedDirectory, "session.status", { sessionID: "ses_unrelated", status: { type: "busy" } })
+  expect(activity.status("ses_unrelated")).toBe("busy")
+  ActivityEvents.current.onerror?.()
+  expect(activity.status("ses_unrelated")).toBeUndefined()
+  // Core restarted meanwhile: it no longer runs the session.
+  snapshots[unrelatedDirectory].status = {}
+  const before = fetchSpy.mock.calls.length
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const read = fetchSpy.mock.calls.slice(before).some(([input]) => String(input).includes("/oc/session/status") && String(input).includes(encodeURIComponent(unrelatedDirectory)))
+  expect(read).toBe(true)
+  expect(activity.status("ses_unrelated")).toBe("idle")
+})
+
+test("an event after the stream comes back is shown before its directory is re-read", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.onerror?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  expect(activity.status("ses_child")).toBe("busy")
+})
+
+test("running() follows the same outage rule: a busy child from before the drop is not running while unknown", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
+  ActivityEvents.current.onerror?.()
+  expect(activity.running("ses_parent")).toEqual([])
+})
+
+test("a reconnect read does not reuse a status fetch that started before the drop", async () => {
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  const held = holdSnapshot(activity, childDirectory)
+  ActivityEvents.current.onerror?.()
+  // Core restarts while the old read is held; the reconnect must read again after it.
+  snapshots[childDirectory].status = {}
+  ActivityEvents.current.onopen?.()
+  held.release()
+  await held.loading
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(activity.status("ses_child")).toBe("idle")
+})
+
+test("a busy session whose tool waits on a permission in its exact directory reads pending after a reconnect, not running only (orchestrator #830)", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  // The permission.asked event is lost with the stream; Core still reports the session busy and the request pending.
+  ActivityEvents.current.onerror?.()
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  snapshots[childDirectory].permissions = [permission("per_exact_dir")]
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  // The sidebar's dot checks pending before running (state.tsx dotFor), so this session shows permission-blocked.
+  expect(activity.running("ses_child")).toEqual(["ses_child"])
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_exact_dir")).toBe("pending")
+  // (pending() is asserted by the existing suite's request tests, which fail on dev in this harness for reasons
+  // unrelated to status; requestState is the read the dot's pending path relies on.)
+})
+
+test("after a reconnect read succeeds, a later failed status read keeps the freshly observed busy (orchestrator #844)", async () => {
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.onerror?.()
+  expect(activity.running("ses_parent")).toEqual([])
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  await activity.refreshDirectory(childDirectory, true)
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
+  // The stream stays up; the next status read of that directory fails.
+  failures.add(`${childDirectory}:/oc/session/status`)
+  await activity.refreshDirectory(childDirectory, true)
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
 })

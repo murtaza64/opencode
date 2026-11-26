@@ -62,8 +62,17 @@ export const pageOrigin = (value: unknown) => {
 }
 
 /** How a host is reached: "proxy" serves this machine's app against its Core and dashboard through a
- * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view. */
-export type RemoteHost = HostLink & { mode: "proxy" | "page"; default?: boolean; profile: Profile; kind?: HostKind }
+ * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view;
+ * "bridged" serves this machine's app against the host's paired gateway behind Cloudflare Access,
+ * with the Access service token named by `access.keychain` (read from this machine's Keychain);
+ * "ssh" is a Personal host read over pinned SSH as a peer of the bridged Personal listener (es-desktop ssh-peer.ts),
+ * never a listener or page of its own. Its `origin` is `ssh://<id>`, an identity only, never fetched. */
+export type RemoteHost = HostLink & { mode: "proxy" | "page" | "bridged" | "ssh"; default?: boolean; profile: Profile; kind?: HostKind; access?: { keychain: string }; ssh?: SshTarget }
+/** A pinned SSH destination (`user@host` or `host`, never an option) and the host's loopback Core and dashboard ports. */
+export type SshTarget = { destination: string; corePort: number; dashboardPort: number }
+
+/** Upstreams for a bridged host's listener: the gateway serves Core at /oc and the dashboard at /es. */
+export const bridgedTargets = (origin: string) => ({ opencode: `${origin}/oc`, dashboard: `${origin}/es` })
 
 /** Configured remote hosts: [{ id, label, origin, mode?, default? }] with distinct ids other than "local";
  * at most one proxied host is the default for new work. */
@@ -74,14 +83,18 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
     const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {}
     if (typeof record.id !== "string" || !ID.test(record.id) || record.id === "local") throw new Error("Invalid remote host id")
     const label = typeof record.label === "string" && record.label.trim() ? record.label.trim().slice(0, 40) : record.id
-    const mode = record.mode === "page" ? "page" : "proxy"
+    const mode = record.mode === "page" ? "page" : record.mode === "bridged" ? "bridged" : record.mode === "ssh" ? "ssh" : "proxy"
+    const access = record.access && typeof record.access === "object" ? (record.access as Record<string, unknown>).keychain : undefined
+    if (mode === "bridged" && (typeof access !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(access))) throw new Error("Bridged hosts need access.keychain")
     if (record.profile !== undefined && !PROFILES.includes(record.profile as string)) throw new Error("Invalid remote host profile")
     if (record.kind !== undefined && !KINDS.includes(record.kind as string)) throw new Error("Invalid remote host kind")
-    // Proxied app hosts are Work and page hosts (their own served page, e.g. behind Access) are
-    // Personal, unless configured otherwise.
-    const profile = (record.profile ?? (mode === "page" ? "personal" : "work")) as Profile
+    // Proxied app hosts are Work; page and bridged hosts (behind Access) are Personal, unless configured otherwise.
+    const profile = (record.profile ?? (mode === "proxy" ? "work" : "personal")) as Profile
+    // SSH reads arrive at the host as loopback trust; only a Personal host is read this way (contract §5b).
+    if (mode === "ssh") return { id: record.id, label, origin: `ssh://${record.id}`, mode, profile: personalOnly(profile), ssh: sshTarget(record.ssh), ...(record.kind ? { kind: record.kind as HostKind } : {}) } as RemoteHost
     return {
-      id: record.id, label, origin: mode === "page" ? pageOrigin(record.origin) : remoteOrigin(record.origin), mode, profile,
+      id: record.id, label, origin: mode === "proxy" ? remoteOrigin(record.origin) : pageOrigin(record.origin), mode, profile,
+      ...(mode === "bridged" ? { access: { keychain: access as string } } : {}),
       ...(record.kind ? { kind: record.kind as HostKind } : {}),
       ...(record.default === true && mode === "proxy" ? { default: true } : {}),
     } as RemoteHost
@@ -91,11 +104,40 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
   return hosts
 }
 
+/** The page hosts a bridged host replaces in the window: same origin and profile. The bridged entry is the one tab of
+ * that host; the page keeps its id and partition but gets no tab, read or cookie pass, so its storage stays exactly as
+ * it was (no migration). Page id -> bridged id. */
+export const shadowedPages = (hosts: readonly RemoteHost[]) =>
+  new Map(hosts.filter((host) => host.mode === "page").flatMap((page) => {
+    const bridged = hosts.find((host) => host.mode === "bridged" && host.origin === page.origin && host.profile === page.profile)
+    return bridged ? [[page.id, bridged.id] as const] : []
+  }))
+
+/** The strip tab a host's tab sits within: a proxied Work host is shown by the Work view ("local") and opened from the
+ * Hosts menu; every other host (a bridged Personal host included) is its own strip tab with its own count. */
+export const tabWithin = (host: Pick<RemoteHost, "mode" | "profile">) => host.mode === "proxy" && host.profile === "work" ? "local" : undefined
+
 /** Upstreams for one host's listener: the Core at the root, the dashboard under /es. */
+const personalOnly = (profile: Profile) => {
+  if (profile !== "personal") throw new Error("SSH hosts are Personal only")
+  return profile
+}
+
+const sshTarget = (value: unknown): SshTarget => {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const port = (item: unknown) => typeof item === "number" && Number.isInteger(item) && item >= 1 && item <= 65535
+  // A leading "-" would be read by ssh as an option.
+  if (typeof record.destination !== "string" || !/^(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/.test(record.destination))
+    throw new Error("SSH hosts need ssh.destination as user@host")
+  if (!port(record.corePort) || !port(record.dashboardPort)) throw new Error("SSH hosts need ssh.corePort and ssh.dashboardPort")
+  return { destination: record.destination, corePort: record.corePort as number, dashboardPort: record.dashboardPort as number }
+}
+
 export const remoteTargets = (origin: string) => ({ opencode: origin, dashboard: `${origin}/es` })
 
-// Routes the dashboard authorizes with the operator cookie: attention, the Front desk's own files, and pin writes.
-export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen|briefs\/[^/]+\/regenerate)$|pins\/[^/]+(?:\/order)?$)/
+// Routes the dashboard authorizes with the operator cookie: attention, the Front desk's own files, pin writes and
+// on-surface comments.
+export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|mail\/wake$|frontdesk\/(?:memory|pointer|ignored-failures|deliverables\/seen|briefs\/[^/]+\/regenerate)$|pins\/[^/]+(?:\/order)?$|surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$)/
 
 const OPERATOR = "es_attention_operator"
 // Cookies ignore ports, so every loopback listener sees every host's cookies: give each remote
@@ -118,8 +160,17 @@ export const remoteSetCookie = (values: string[] | undefined, id: string) => {
 }
 
 /** A host aggregated into the Work view: its laptop listener origin (for opening its pages) and
- * whether new work goes there by default. */
-export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind }
+ * whether new work goes there by default. `readOnly`: its rows are read through this listener, but no
+ * session is created or written there from this page (a pinned-SSH Personal peer until M4). */
+export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind; readOnly?: true }
+
+/** The hosts a bridged Personal aggregator lists to its own page: itself (where new work goes) and each
+ * pinned-SSH Personal peer, read only at /hosts/<id>/ on the same listener. Never a Work host. */
+export const personalWork = (self: RemoteHost, peers: RemoteHost[], origin: string): WorkHost[] => [
+  { id: self.id, label: self.label, origin, profile: "personal", default: true, ...(self.kind ? { kind: self.kind } : {}) },
+  ...peers.filter((peer) => peer.mode === "ssh" && peer.profile === "personal" && peer.id !== self.id)
+    .map((peer): WorkHost => ({ id: peer.id, label: peer.label, origin, profile: "personal", readOnly: true, ...(peer.kind ? { kind: peer.kind } : {}) })),
+]
 
 const HOST_PATH = /^\/hosts\/([a-z][a-z0-9-]{0,31})(\/(?:oc|es)(?:\/.*)?)$/
 

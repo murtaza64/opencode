@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { createComposer, dictationInsert, getComposer } from "./composer"
-import { createDictation, dictationTarget, type DictationTarget } from "./dictation"
+import { createDictation, dictationTarget, fieldTarget, type DictationTarget } from "./dictation"
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -312,4 +312,90 @@ test("dictated text is spaced against its neighbours", () => {
   expect(dictationInsert(draft("a ", [2, 2]), { revision: 1, selection: [9, 9] }, "X")).toMatchObject({ text: "a X", caret: 3 })
   // Edited since capture: never replaces the (stale) captured selection.
   expect(dictationInsert(draft("new text", [8, 8], 2), { revision: 1, selection: [0, 3] }, "X")).toMatchObject({ text: "new text X", caret: 10 })
+})
+
+// Origin binding (Rook issue18): synthetic transcripts only; no capture.
+const record = async (net: ReturnType<typeof bridge>, voice: ReturnType<typeof createDictation>, target: DictationTarget, text: string, between?: () => void) => {
+  await voice.refresh()
+  const starting = voice.start(target)
+  await net.release("start", Response.json({ ok: true }))
+  await starting
+  between?.()
+  const stopping = voice.stop()
+  await net.release("stop", Response.json({ ok: true, text }))
+  await stopping
+}
+
+test("switching session mid-recording holds the transcript on the original draft, never the open one", async () => {
+  const { net, composers, voice, target } = setup()
+  composers.a.setText("draft A")
+  composers.b.setText("draft B")
+  voice.setView({ sessionID: "ses_a", directory: "/repo" })
+  await record(net, voice, target("a"), "spoken for A", () => voice.setView({ sessionID: "ses_b", directory: "/repo" }))
+  expect(composers.a.state.task.text).toBe("draft A")
+  expect(composers.b.state.task.text).toBe("draft B")
+  const held = voice.pending({ sessionID: "ses_a", directory: "/repo" })
+  expect(held.map((item) => item.text)).toEqual(["spoken for A"])
+  expect(voice.pending({ sessionID: "ses_b", directory: "/repo" })).toEqual([])
+  // Back in A, Insert puts it at A's caret; it is never sent.
+  voice.setView({ sessionID: "ses_a", directory: "/repo" })
+  composers.a.setSelection(7, 7)
+  voice.acceptPending(target("a"), held[0]!.id)
+  expect(composers.a.state.task.text).toBe("draft A spoken for A")
+  expect(voice.pending({ sessionID: "ses_a", directory: "/repo" })).toEqual([])
+  expect(composers.a.state.normalSubmission).toBeNull()
+})
+
+test("a profile switch (another window origin) mid-recording holds the transcript; it is never inserted late", async () => {
+  const net = bridge()
+  let current = "https://work.local"
+  const draft = composer("ses_p")
+  const voice = createDictation({ fetch: net.fetch, origin: () => current, insert: (target, text) => draft.insertDictation(target.buffer, target, text) })
+  draft.setText("work draft")
+  await record(net, voice, dictationTarget("ses_p", "/repo", "task", draft.state.task), "secret", () => { current = "https://personal.local" })
+  expect(draft.state.task.text).toBe("work draft")
+  expect(voice.pending({ sessionID: "ses_p", directory: "/repo" }).map((item) => item.text)).toEqual(["secret"])
+})
+
+test("cancel says so on the origin draft and nothing lands, even if a transcript arrives", async () => {
+  const { net, composers, voice, target } = setup()
+  await voice.refresh()
+  const starting = voice.start(target("a"))
+  await net.release("start", Response.json({ ok: true }))
+  await starting
+  await voice.cancel()
+  expect(voice.state.notice).toMatchObject({ text: "Dictation cancelled", target: { sessionID: "ses_a" } })
+  expect(composers.a.state.task.text).toBe("")
+  expect(voice.pending({ sessionID: "ses_a", directory: "/repo" })).toEqual([])
+})
+
+test("a clip stops itself at the length bound and transcribes what it has", async () => {
+  const net = bridge()
+  const draft = composer("ses_c")
+  const voice = createDictation({ fetch: net.fetch, maxClipMs: 5, insert: (target, text) => draft.insertDictation(target.buffer, target, text) })
+  await voice.refresh()
+  const starting = voice.start(dictationTarget("ses_c", "/repo", "task", draft.state.task))
+  await net.release("start", Response.json({ ok: true }))
+  await starting
+  await new Promise((done) => setTimeout(done, 20))
+  expect(voice.state.phase).toBe("transcribing")
+  expect(net.calls.at(-1)?.action).toBe("stop")
+  await net.release("stop", Response.json({ ok: true, text: "long note" }))
+  await new Promise((done) => setTimeout(done, 0))
+  expect(draft.state.task.text).toBe("long note")
+  expect(voice.state.notice?.text).toBe("Stopped at the clip limit")
+})
+
+test("a decision note field takes its transcript while mounted, and holds it when not", async () => {
+  const net = bridge()
+  const voice = createDictation({ fetch: net.fetch })
+  const notes: string[] = []
+  const field = fieldTarget("decision-note:fixture:dec_1")
+  const detach = voice.attachField("decision-note:fixture:dec_1", (text) => notes.push(text))
+  await record(net, voice, field, "approve with conditions")
+  expect(notes).toEqual(["approve with conditions"])
+  detach()
+  await record(net, voice, field, "second thought")
+  expect(notes).toEqual(["approve with conditions"])
+  expect(voice.pending(field).map((item) => item.text)).toEqual(["second thought"])
 })

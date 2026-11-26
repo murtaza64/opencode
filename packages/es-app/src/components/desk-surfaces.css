@@ -17,13 +17,38 @@
 .work-remote-surface { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Seamless in the pane: no card padding or border, one compact bar, the frame edge to edge. */
 .desk-evidence.desk-surface, .desk-evidence.work-remote[data-remote-kind=surface] { padding: 0; border: 0; }
-.surface-bar { flex: none; display: flex; align-items: center; gap: 8px; block-size: 30px; box-sizing: border-box; min-inline-size: 0; padding-inline: 10px 4px; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
-.desk .surface-bar h2 { flex: 0 1 auto; min-inline-size: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: normal; }
-.surface-bar .work-remote-host { display: inline-flex; align-items: center; gap: 4px; }
-.surface-bar .work-remote-host, .surface-bar-link { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
-.surface-bar-actions { flex: none; display: flex; gap: 2px; margin-inline-start: auto; }
-.desk .surface-bar-button { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--subtext0); font-size: 16px; line-height: 1; }
-.desk .surface-bar-button:hover { background: var(--surface0); color: var(--text); }
+/* The Surface's title and actions in the app top bar (AppHeader): one compact row; the session header's own layout
+ * (native-header.css) is unchanged. In a plain browser the same row is the pane's inline header. */
+/* The title starts where the What's new line's text does (.surface-change padding), not at the pane edge. */
+.surface-head { display: flex; align-items: center; gap: 8px; min-inline-size: 0; flex: 1 1 auto; block-size: 100%; padding-inline-start: 12px; box-sizing: border-box; }
+.surface-head h2 { flex: 0 1 auto; min-inline-size: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: normal; }
+.surface-head .work-remote-host { display: inline-flex; align-items: center; gap: 4px; }
+.surface-head .work-remote-host, .surface-head-link { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.surface-head-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-inline-start: auto; -webkit-app-region: no-drag; }
+.surface-head-button { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--subtext0); font-size: 16px; line-height: 1; }
+.surface-head-button:hover { background: var(--surface0); color: var(--text); }
+/* Done for the revision on screen: a quiet text control, then "Done · time" with Undo once saved. */
+.surface-head-spacer { flex: 1 1 0; min-inline-size: 0; }
+.surface-head-done { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: 11px; color: var(--subtext0); -webkit-app-region: no-drag; }
+.surface-head-rev { flex: none; color: var(--overlay1); font-size: 11px; white-space: nowrap; }
+.surface-head-done .surface-done { border: 0; color: var(--green); }
+/* rev N and Seen share the title's baseline. */
+.surface-head > .surface-head-rev { align-self: baseline; }
+.surface-head h2 { align-self: baseline; }
+span.surface-done { cursor: default; }
+.surface-head-text { padding: 2px 6px; border: 1px solid var(--surface1); border-radius: 4px; background: transparent; color: var(--text); font-size: 11px; line-height: 1.4; }
+.surface-head-text:hover:not(:disabled) { background: var(--surface0); }
+.surface-head-text:disabled { opacity: 0.6; }
+.surface-head-text[data-newer] { border-style: dashed; }
+.surface-head :is(a, button, h2) { -webkit-app-region: no-drag; }
+/* Find in Surface (Cmd/Ctrl+F): sits before the actions and shrinks before them; the count never wraps. */
+.surface-find { flex: 0 1 300px; min-inline-size: 0; display: flex; align-items: center; gap: 2px; margin-inline-start: auto; -webkit-app-region: no-drag; }
+.surface-find + .surface-head-actions { margin-inline-start: 0; }
+.surface-find-input { flex: 1 1 8rem; min-inline-size: 4rem; block-size: 24px; padding: 0 6px; border: 1px solid var(--surface1); border-radius: 4px; background: var(--base); color: var(--text); font: inherit; font-size: 12px; }
+.surface-find-input:focus-visible { outline: 2px solid var(--blue); outline-offset: -1px; }
+.surface-find-count { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+.surface-find .surface-head-button:disabled { opacity: 0.4; }
+@media (max-width: 520px) { .surface-find { flex-basis: 180px; } .surface-find-count { max-inline-size: 5.5rem; } }
 .desk-surface > .desk-surface-frame, .work-remote-surface > .desk-surface-frame { border: 0; }
 @media (max-width: 900px) {
   .desk-evidence.desk-surface { padding-inline: 0; border: 0; }
@@ -34,3 +59,63 @@
 .desk-deliverable[data-new] { border-inline-start-color: var(--blue); }
 .desk-deliverable-preview { font-size: 12px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-deliverables-earlier > summary { cursor: pointer; padding: 4px 10px; font-size: 12px; color: var(--subtext1); }
+/* Who owns the Surface and a way to them, beside the title. */
+.surface-owner { flex: 0 2 auto; display: inline-flex; align-items: center; min-inline-size: 72px; max-inline-size: 140px; -webkit-app-region: no-drag; }
+.surface-owner-menu { position: relative; display: flex; min-inline-size: 0; max-inline-size: 100%; }
+.surface-owner-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; }
+.surface-owner-menu > summary::-webkit-details-marker { display: none; }
+/* The chip shrinks with a narrow bar and clips its own name, so it never covers Seen. */
+.surface-owner-chip { display: inline-flex; align-items: center; gap: 5px; min-inline-size: 0; max-inline-size: 100%; overflow: hidden; padding: 2px 7px 2px 2px; border-radius: 999px; background: var(--surface0); font-size: 12px; }
+.surface-owner-chip:hover { background: var(--surface1); }
+.surface-owner-chip bdi { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.surface-owner-avatar { flex: none; display: grid; place-items: center; inline-size: 21px; block-size: 21px; overflow: hidden; border-radius: 7px; background: var(--peach); color: var(--crust); font-weight: 700; }
+.surface-owner-avatar img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.surface-owner-items, .surface-more-items { position: absolute; inset-inline-start: 0; inset-block-start: calc(100% + 4px); z-index: 20; display: grid; gap: 2px; padding: 6px; min-inline-size: 230px;
+  max-inline-size: min(80vw, 320px); background: var(--mantle); border: 1px solid var(--surface1); border-radius: 8px; box-shadow: 0 12px 30px rgb(0 0 0 / 40%); }
+.surface-owner-items :is(button, a), .surface-more-items :is(button, a) { display: block; inline-size: 100%; padding: 7px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: start; font: inherit; font-size: 12px; text-decoration: none; white-space: normal; }
+.surface-owner-items :is(button, a):hover, .surface-more-items :is(button, a):hover { background: var(--surface0); }
+.surface-owner-meta { display: block; padding: 5px 9px; font-size: 11px; color: var(--subtext0); white-space: normal; }
+.surface-more { position: relative; flex: none; -webkit-app-region: no-drag; }
+.surface-more > summary { list-style: none; cursor: pointer; }
+.surface-more > summary::-webkit-details-marker { display: none; }
+.surface-more-items { inset-inline-start: auto; inset-inline-end: 0; }
+.surface-more-items .surface-head-slot:not([hidden]) { display: block; }
+/* Decisions about the Surface on screen (artifact-try-decision-unification): a one-line banner under the reader's bar that
+ * expands into a band scrolling on its own, so the frame keeps most of the pane; the card's own "Open <artifact>" button
+ * would only reopen this view. Selectors outrank .attention-home's padding and button chrome. */
+.surface-decisions.attention-home { flex: none; padding: 0; max-width: none; margin: 0; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
+.surface-decisions > .surface-decisions-banner { display: flex; align-items: center; gap: 8px; inline-size: 100%; min-block-size: 32px; padding: 4px 14px; border: 0;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: start; cursor: pointer; }
+.surface-decisions > .surface-decisions-banner:hover { background: var(--surface0); }
+.surface-decisions-banner:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.surface-decisions-label { flex: none; font-weight: 600; }
+.surface-decisions-title { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
+.surface-decisions-toggle { flex: none; margin-inline-start: auto; color: var(--blue); font-size: 12px; }
+.surface-decisions-body { max-block-size: 45vh; overflow: auto; border-block-start: 1px solid var(--surface0); }
+.surface-decisions .home-decision { padding: 10px 14px; border-block-end: 0; }
+.surface-decisions .home-decision-title > .artifact-open, .surface-decisions .home-decision-title > .artifact-unavailable { display: none; }
+.surface-decision + .surface-decision { border-block-start: 1px solid var(--surface0); }
+.surface-decision-stale { margin: 8px 14px 0; font-size: 12px; }
+@media (max-width: 900px) { .surface-decisions-body { max-block-size: 55vh; } }
+/* A Surface's change note (DD #725): one line under the reader bar; earlier notes open below it. */
+/* One fixed row: the note ellipsises and the frame top stays put; More (data-expanded) lets it wrap and grow. */
+.surface-change-wrap { display: flex; align-items: flex-start; gap: 8px; padding: 0 12px; border-block-end: 1px solid var(--surface0); }
+.surface-change { flex: 1 1 auto; min-inline-size: 0; display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px 8px; block-size: 30px; line-height: 30px; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--text); }
+.surface-change > * { flex: none; }
+.surface-change > .surface-change-text { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.surface-change-wrap[data-expanded] .surface-change { flex-wrap: wrap; block-size: auto; line-height: 1.5; padding-block: 6px; white-space: normal; }
+.surface-change-wrap[data-expanded] .surface-change > .surface-change-text { flex-shrink: 1; overflow: visible; }
+.surface-change-more { flex: none; line-height: 30px; font-size: 11px; }
+.surface-change-label { flex: none; font-size: 11px; color: var(--subtext0); }
+.surface-change-text { min-inline-size: 0; overflow-wrap: anywhere; }
+.surface-change-none { color: var(--subtext0); font-style: italic; }
+.surface-change-since { font-size: 11px; }
+.surface-change-earlier { flex-basis: 100%; margin: 2px 0 0; padding-inline-start: 16px; display: grid; gap: 2px; }
+.nav-change { display: block; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.surface-change-look, .surface-change-respond { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; color: var(--subtext0); }
+.surface-change-place { font-size: 12px; }
+.surface-change[data-intent="review"] > .surface-change-label { color: var(--blue); }
+.surface-change[data-intent="decision"] > .surface-change-label { color: var(--peach); }
+/* BuildingHub share line in the reader's More menu (DD #782). */
+.surface-buildinghub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.surface-buildinghub-note { color: var(--subtext0); }

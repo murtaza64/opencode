@@ -61,7 +61,7 @@ describe("InstanceStore", () => {
     }),
   )
 
-  it.effect("resolve memoizes project identity until the idle TTL without bootstrapping", () =>
+  it.effect("resolve memoizes project identity without bootstrapping", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
       const store = yield* InstanceStore.Service
@@ -76,13 +76,59 @@ describe("InstanceStore", () => {
       const first = yield* store.resolve(dir)
       expect(yield* store.resolve(dir)).toBe(first)
       expect(updates).toBe(1)
-      yield* TestClock.adjust("11 minutes")
-      const next = yield* store.resolve(dir)
-      expect(next).not.toBe(first)
-      expect(next.project.id).toBe(first.project.id)
-      expect(updates).toBe(2)
       expect(boots).toBe(0)
       expect(store.size()).toBe(0)
+    }),
+  )
+
+  it.effect("resolve past the idle TTL answers from the memoized identity and refreshes it once in the background", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let updates = 0
+      const onEvent = (event: { payload: { type: string } }) => {
+        if (event.payload.type === "project.updated") updates++
+      }
+      GlobalBus.on("event", onEvent)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+      const first = yield* store.resolve(dir)
+      // A polled directory is read more often than the idle TTL, so the sweep keeps its identity.
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* store.resolve(dir)).toBe(first)
+      yield* TestClock.adjust("6 minutes")
+      const stale = yield* store.resolve(dir)
+      expect(stale).toBe(first)
+      expect(yield* store.resolve(dir)).toBe(first)
+      // The refresh runs real git processes while TestClock is frozen, so wait in real time.
+      const refreshed = yield* Effect.gen(function* () {
+        for (let attempt = 0; attempt < 500; attempt++) {
+          const next = yield* store.resolve(dir)
+          if (next !== first) return next
+          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)))
+        }
+        return yield* Effect.die(new Error("identity was never refreshed in the background"))
+      })
+      expect(refreshed.project.id).toBe(first.project.id)
+      expect(updates).toBe(2)
+      expect(store.size()).toBe(0)
+    }),
+  )
+
+  it.live("load reuses the identity resolve already found instead of resolving it again", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let updates = 0
+      const onEvent = (event: { payload: { type: string } }) => {
+        if (event.payload.type === "project.updated") updates++
+      }
+      GlobalBus.on("event", onEvent)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+      const resolved = yield* store.resolve(dir)
+      const loaded = yield* store.load({ directory: dir })
+      expect(loaded.project.id).toBe(resolved.project.id)
+      expect(loaded.worktree).toBe(resolved.worktree)
+      expect(updates).toBe(1)
     }),
   )
 

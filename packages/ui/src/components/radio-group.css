@@ -144,13 +144,13 @@
   }
 
   /* Focus state */
-  [data-slot="radio-group-wrapper"]:has([data-slot="radio-group-item-input"]:focus-visible)
+  [data-slot="radio-group-wrapper"][data-item-focus-visible]
     [data-slot="radio-group-indicator"] {
     box-shadow: var(--shadow-xs-border-focus);
   }
 
   /* Hide indicator when nothing is checked */
-  [data-slot="radio-group-wrapper"]:not(:has([data-slot="radio-group-item-input"][data-checked]))
+  [data-slot="radio-group-wrapper"]:not([data-item-checked])
     [data-slot="radio-group-indicator"] {
     --indicator-opacity: 0;
   }

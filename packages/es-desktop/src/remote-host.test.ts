@@ -4,8 +4,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import WebSocket from "ws"
 import { serve } from "./server"
-import { pageNavigation, serviceHosts } from "./policy"
+import { pageNavigation, plainChromeUserAgent, serviceHosts } from "./policy"
 import type { HostInfo } from "../../es-app/remote-host"
+
+// Surface pages arrive with exactly one comment bridge inlined (es-app surface-bridge.ts); the page itself is untouched.
+const pageOf = (html: string) => {
+  expect(html.match(/<script data-es-comments>/g)?.length).toBe(1)
+  return html.replace(/<script data-es-comments>[\s\S]*?<\/script>/, "")
+}
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -208,7 +214,7 @@ test("a remote host's listener opens that host's file surface through its dashbo
   expect(src).toMatch(/^\/__cap\/surface\/api-tests\/[0-9a-z]+-[0-9a-f]{32}\/$/)
   const frame = await fetch(`${miniServer.origin}${src}`)
   expect(frame.status).toBe(200)
-  expect(await frame.text()).toBe(report)
+  expect(pageOf(await frame.text())).toBe(report)
   expect(frame.headers.get("content-security-policy")).toContain(`script-src ${miniServer.origin}${src} 'unsafe-inline'`)
   expect(frame.headers.get("content-security-policy")).toContain("sandbox allow-scripts")
   expect(frame.headers.get("set-cookie")).toBeNull()
@@ -317,7 +323,8 @@ test("the local listener reads another host's session list with no credential an
     expect(mini.seen.at(-1)).toEqual({ path: pathname.slice(3), cookie: null, authorization: null, origin: null })
   }
   // Another host's handoff lineage and lane owners are read the same way, so a pin follows a handoff there.
-  for (const pathname of ["/es/api/handoffs", "/es/api/state"]) {
+  // Mail tool rows read that host's mail and its delivery receipts (read-only, no credential).
+  for (const pathname of ["/es/api/handoffs", "/es/api/state", "/es/api/mail"]) {
     expect(await (await get(`/hosts/mini${pathname}?es=opencode`)).json()).toMatchObject({ host: "mini", path: pathname })
     expect(mini.seen.at(-1)).toEqual({ path: pathname, cookie: null, authorization: null, origin: null })
   }
@@ -340,8 +347,8 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   for (const [method, pathname] of [
     ["POST", "/oc/session/ses_same/prompt_async"], ["POST", "/oc/session/ses_same/message"], ["PATCH", "/oc/session/ses_same"],
     ["DELETE", "/oc/session/ses_same"], ["POST", "/oc/session/ses_same/abort"], ["POST", "/oc/permission/per_1/reply"],
-    ["GET", "/oc/session/ses_same/children/x"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
-    ["GET", "/oc/session/ses_same/message/msg_1/x"],
+    ["GET", "/oc/session/ses_same/children/x"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/x"],
+    ["POST", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"], ["GET", "/oc/session/ses_same/message/msg_1/x"],
   ]) expect((await get(`/hosts/mini${pathname}`, { method, ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
@@ -356,6 +363,9 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/local/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/mini//oc/experimental/session")).status).toBe(404)
   expect(mini.seen.length).toBe(before)
+  // One tool part's attachment is a session read (compact messages load it when the call is opened).
+  await get("/hosts/mini/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0")
+  expect(mini.seen.at(-1)?.path).toBe("/session/ses_same/message/msg_1/part/prt_1/attachment/0")
 })
 
 test("this window sends input to, and stops, a run on another host: native origin only, that host's origin upstream, no credential", async () => {
@@ -435,6 +445,16 @@ test("another host's attention carries only that host's operator cookie, minted 
   })
   expect(brief.status).toBe(200)
   expect(seen.at(-1)).toEqual({ path: "/es/api/frontdesk/briefs/00000000-0000-4000-8000-000000000000/regenerate", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+  // Done for a requested deliverable is that host's seen state, with that host's operator cookie only.
+  const done = await get("/hosts/mini/es/api/frontdesk/deliverables/seen", {
+    method: "POST", body: '{"id":"report","revision":2,"seen":true}', headers: { ...headers, cookie: "es_attention_operator=local-op; es_attention_operator__mini=op-mini" },
+  })
+  expect(done.status).toBe(200)
+  expect(seen.at(-1)).toEqual({ path: "/es/api/frontdesk/deliverables/seen", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+  const before = seen.length
+  const foreign = await get("/hosts/mini/es/api/frontdesk/deliverables/seen", { method: "POST", body: "{}", headers: { ...headers, origin: "https://evil.test" } })
+  expect(foreign.status).toBe(403)
+  expect(seen.length).toBe(before)
 })
 
 test("host writes are exactly the own-host session, Aside, model, reply and attention writes; encoded or other paths are refused", async () => {
@@ -524,9 +544,9 @@ test("the Work view frames another host's file surface from that host through th
   const wing = (await (await get("/hosts/wing/__es/surface/report")).json()).src as string
   expect(mini).toMatch(/^\/__cap\/host\/mini\/surface\/report\/[0-9a-z]+-[0-9a-f]{32}\/$/)
   const frame = await fetch(`${server.origin}${mini}`)
-  expect([frame.status, await frame.text()]).toEqual([200, "<h1>mini report</h1>"])
+  expect([frame.status, pageOf(await frame.text())]).toEqual([200, "<h1>mini report</h1>"])
   expect(frame.headers.get("content-security-policy")).toContain(`script-src ${server.origin}${mini} 'unsafe-inline'`)
-  expect(await (await fetch(`${server.origin}${wing}`)).text()).toBe("<h1>wing report</h1>")
+  expect(pageOf(await (await fetch(`${server.origin}${wing}`)).text())).toBe("<h1>wing report</h1>")
   // A capability is valid only for the host that minted it, and never for this host's own surfaces.
   expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/host/wing/")}`)).status).toBe(404)
   expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/")}`)).status).toBe(404)
@@ -546,6 +566,26 @@ test("host reads add exactly what the session view reads: pending inputs, subage
   for (const pathname of ["/oc/config", "/oc/session/ses_m/aside", "/oc/session/ses_m/children/x", "/oc/agent", "/oc/session/ses_m/input/req_1/deliver"])
     expect(hostApiAllowed("GET", pathname)).toBe(false)
   expect(hostApiAllowed("POST", "/oc/session/ses_m/input")).toBe(false)
+})
+
+test("host reads allow the subscription quota snapshot only as an exact read", async () => {
+  const { hostApiAllowed } = await import("./policy")
+  expect(hostApiAllowed("GET", "/es/api/quota")).toBe(true)
+  for (const pathname of ["/es/api/quota/claude", "/es/api/quotas", "/es/api/quota/"]) expect(hostApiAllowed("GET", pathname)).toBe(false)
+  for (const method of ["POST", "PUT", "DELETE"]) expect(hostApiAllowed(method, "/es/api/quota")).toBe(false)
+})
+
+test("a Personal aggregator lists itself for new work and its SSH peers read only, never a Work host", async () => {
+  const { personalWork, remoteHosts } = await import("../../es-app/remote-host")
+  const configured = remoteHosts([
+    { id: "excalibur", label: "Excalibur", mode: "bridged", origin: "https://excalibur.example.com", access: { keychain: "excalibur-access" }, kind: "pc" },
+    { id: "ygnium", label: "Ygnium", mode: "ssh", ssh: { destination: "me@ygnium.lan", corePort: 4096, dashboardPort: 7777 }, kind: "pc" },
+    { id: "mini", label: "Mac Mini", origin: "https://mini.tail1234.ts.net" },
+  ])
+  expect(personalWork(configured[0]!, configured, "http://127.0.0.1:51234")).toEqual([
+    { id: "excalibur", label: "Excalibur", origin: "http://127.0.0.1:51234", profile: "personal", default: true, kind: "pc" },
+    { id: "ygnium", label: "Ygnium", origin: "http://127.0.0.1:51234", profile: "personal", readOnly: true, kind: "pc" },
+  ])
 })
 
 test("writes reach only a configured Work host; an unknown id, a Personal host or a stopped host never falls back to this one", async () => {
@@ -672,4 +712,159 @@ test("one proxied host may be the default for new work", async () => {
     { id: "personal", label: "personal", origin: "https://x.y", mode: "page", profile: "personal" },
   ])
   await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"m2","origin":"https://c.b.ts.net","default":true}]' })).rejects.toThrow("Only one default host")
+})
+
+test("a proxied host's own tab carries that host's operator cookie on Front Desk pointer reads and writes", async () => {
+  const { attentionRoute } = await import("../../es-app/remote-host")
+  expect(attentionRoute.test("/es/api/frontdesk/pointer")).toBe(true)
+  expect(attentionRoute.test("/es/api/frontdesk/pointer/x")).toBe(false)
+})
+
+// A Mini Core whose event stream answers `fail` with an error status before it serves events again (a restart's 503,
+// or a refused 401), counting every attempt.
+const flakyStream = (fail: { status: number; times: number }) => {
+  const attempts: number[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => {
+      if (new URL(request.url).pathname !== "/global/event") return Response.json({})
+      attempts.push(Date.now())
+      if (attempts.length <= fail.times) return new Response("restarting", { status: fail.status })
+      return new Response(new ReadableStream({ start: (controller) => controller.enqueue(new TextEncoder().encode('data: {"type":"session.updated","host":"mini"}\n\n')) }),
+        { headers: { "content-type": "text/event-stream" } })
+    },
+  })
+  cleanup.push(async () => void (await server.stop(true)))
+  return { origin: server.url.origin, attempts, seen: [] } as unknown as ReturnType<typeof fakeHost> & { attempts: number[] }
+}
+
+const subscribeHost = async (origin: string, key: string, until: (packets: { id: number; type: string; code?: number }[]) => boolean, extra?: (socket: WebSocket) => void) => {
+  const packets: { id: number; type: string; code?: number }[] = []
+  const socket = new WebSocket(`${origin.replace("http", "ws")}/oc/global/event`, "opencode-events-v1", { headers: { origin, "x-editspace-key": key } })
+  cleanup.push(async () => socket.close())
+  await new Promise<void>((resolve, reject) => {
+    socket.on("open", () => {
+      socket.send(JSON.stringify({ type: "subscribe", id: 1, url: "/hosts/mini/oc/global/event" }))
+      socket.send(JSON.stringify({ type: "subscribe", id: 2, url: "/oc/global/event" }))
+      extra?.(socket)
+    })
+    socket.on("message", (data) => {
+      packets.push(JSON.parse(data.toString()))
+      if (until(packets)) resolve()
+    })
+    socket.on("error", reject)
+  })
+  return { packets, socket }
+}
+
+test("a host stream that answers an error status (Core restarting) is opened again with backoff, without the client resubscribing", async () => {
+  const mini = flakyStream({ status: 503, times: 1 })
+  const { server } = await workListener(mini)
+  const { packets } = await subscribeHost(server.origin, server.key, (seen) => seen.some((packet) => packet.id === 1 && packet.type === "message"))
+  const mine = packets.filter((packet) => packet.id === 1).map((packet) => packet.type)
+  expect(mine.slice(0, 3)).toEqual(["error", "open", "message"])
+  expect(mini.attempts.length).toBe(2)
+  expect(mini.attempts[1]! - mini.attempts[0]!).toBeGreaterThanOrEqual(900)
+  // The socket's other subscription kept serving this host's events.
+  expect(packets.filter((packet) => packet.id === 2).map((packet) => packet.type)).toContain("message")
+}, 10_000)
+
+test("a refused host stream (401) keeps reporting an error and retries with growing waits; it never reports open", async () => {
+  const mini = flakyStream({ status: 401, times: 99 })
+  const { server } = await workListener(mini)
+  const { packets } = await subscribeHost(server.origin, server.key, (seen) => seen.filter((packet) => packet.id === 1 && packet.type === "error").length >= 3)
+  expect(packets.filter((packet) => packet.id === 1).map((packet) => packet.type)).toEqual(["error", "error", "error"])
+  const gaps = mini.attempts.slice(1).map((at, index) => at - mini.attempts[index]!)
+  expect(gaps[1]!).toBeGreaterThan(gaps[0]! * 1.5)
+}, 15_000)
+
+test("unsubscribing while a host stream waits to retry leaves no stream behind", async () => {
+  const mini = flakyStream({ status: 503, times: 99 })
+  const { server } = await workListener(mini)
+  const { socket } = await subscribeHost(server.origin, server.key, (seen) => seen.some((packet) => packet.id === 1 && packet.type === "error"))
+  socket.send(JSON.stringify({ type: "unsubscribe", id: 1 }))
+  const before = mini.attempts.length
+  await Bun.sleep(1500)
+  expect(mini.attempts.length).toBe(before)
+}, 10_000)
+
+// The Personal shape on the laptop today: a legacy page host (id personal, no profile) and a bridged excalibur host
+// added at the same origin.
+const ORIGIN = "https://agents.murtaza.earth"
+const legacyPage = { id: "personal", label: "Personal", origin: ORIGIN, mode: "page" }
+const bridgedExcalibur = { id: "excalibur", label: "Excalibur", origin: ORIGIN, mode: "bridged", profile: "personal", kind: "pc", access: { keychain: "fixture-item" } }
+
+test("a bridged host at the legacy page's origin and profile replaces it as the one Personal tab; a page-only config is unchanged", async () => {
+  const { remoteHosts, shadowedPages } = await import("../../es-app/remote-host")
+  expect([...shadowedPages(remoteHosts([legacyPage]))]).toEqual([])
+  expect([...shadowedPages(remoteHosts([legacyPage, bridgedExcalibur]))]).toEqual([["personal", "excalibur"]])
+  expect([...shadowedPages(remoteHosts([bridgedExcalibur, legacyPage]))]).toEqual([["personal", "excalibur"]])
+  // Another origin, or a page of another profile, is its own host and keeps its tab.
+  expect([...shadowedPages(remoteHosts([{ ...legacyPage, origin: "https://other.murtaza.earth" }, bridgedExcalibur]))]).toEqual([])
+  expect([...shadowedPages(remoteHosts([{ ...legacyPage, profile: "work" }, bridgedExcalibur]))]).toEqual([])
+})
+
+test("only a proxied Work host sits within the Work tab; a bridged Personal host is its own strip tab and count", async () => {
+  const { remoteHosts, tabWithin } = await import("../../es-app/remote-host")
+  const hosts = remoteHosts([{ id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net" }, bridgedExcalibur])
+  expect(hosts.map((host) => [host.id, tabWithin(host)])).toEqual([["mini", "local"], ["excalibur", undefined]])
+})
+
+test("a restore record from before the bridged host drops the replaced page's view and selects the bridged tab", async () => {
+  const { restorePlan } = await import("./policy")
+  const tabs = [{ id: "local", origin: "http://127.0.0.1:60302", kind: "app" as const, start: "http://127.0.0.1:60302" },
+    { id: "excalibur", origin: "http://127.0.0.1:60310", kind: "app" as const, start: "http://127.0.0.1:60310" }]
+  const shadowed = new Map([["personal", "excalibur"]])
+  const record = { version: 1, selected: "personal", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }, { id: "personal", url: `${ORIGIN}/?x=1` }] }
+  expect(restorePlan(record, tabs, shadowed)).toEqual({ selected: "excalibur", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }], dropped: 1 })
+  expect(restorePlan({ ...record, selected: "local" }, tabs, shadowed)).toEqual({ selected: "local", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }], dropped: 1 })
+  // Without the bridged host the page is a tab again and the same record names an unknown host: nothing restores
+  // silently onto another tab.
+  expect(restorePlan(record, tabs)).toBeUndefined()
+})
+
+test("request history is a read on its own host and another Work host, never a write or a sibling path", async () => {
+  const { apiAllowed, hostApiAllowed } = await import("./policy")
+  expect(apiAllowed("GET", "/es/api/decisions/requests")).toBe(true)
+  expect(hostApiAllowed("GET", "/es/api/decisions/requests")).toBe(true)
+  for (const pathname of ["/es/api/decisions", "/es/api/decisions/requests/x", "/es/api/decisions/"]) {
+    expect(apiAllowed("GET", pathname)).toBe(false)
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  }
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    expect(apiAllowed(method, "/es/api/decisions/requests")).toBe(false)
+    expect(hostApiAllowed(method, "/es/api/decisions/requests")).toBe(false)
+  }
+})
+
+test("on-surface comments are read and posted on the own host and another Work host, with the operator cookie", async () => {
+  const { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed } = await import("./policy")
+  const { attentionRoute } = await import("../../es-app/remote-host")
+  const route = "/es/api/surfaces/opencode-week-review/comments"
+  expect(apiAllowed("GET", route)).toBe(true)
+  expect(apiAllowed("POST", route)).toBe(true)
+  expect(hostApiAllowed("GET", route)).toBe(true)
+  expect(hostWriteAllowed("POST", route)).toBe(true)
+  expect(hostAttention(route)).toBe(true)
+  expect(attentionRoute.test(route)).toBe(true)
+  for (const method of ["PUT", "PATCH", "DELETE"]) {
+    expect(apiAllowed(method, route)).toBe(false)
+    expect(hostWriteAllowed(method, route)).toBe(false)
+  }
+  for (const pathname of ["/es/api/surfaces/Bad_Id/comments", "/es/api/surfaces/x/comments/cmt_1", "/es/api/surfaces/x/comment"]) {
+    expect(apiAllowed("POST", pathname)).toBe(false)
+    expect(hostWriteAllowed("POST", pathname)).toBe(false)
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  }
+})
+
+test("a page host presents Chromium's own user agent, without the app or Electron tokens", () => {
+  const electron = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Editspace/2026.11.5 Chrome/142.0.7444.59 Electron/42.3.3 Safari/537.36"
+  expect(plainChromeUserAgent(electron, "Editspace")).toBe("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.59 Safari/537.36")
+  // A plain Chrome agent is unchanged; an app name with regex characters is matched literally.
+  const chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.59 Safari/537.36"
+  expect(plainChromeUserAgent(chrome, "Editspace")).toBe(chrome)
+  expect(plainChromeUserAgent(`${chrome.replace(" Safari", " Edit.space/1 Safari")}`, "Edit.space")).toBe(chrome)
+  expect(plainChromeUserAgent(`${chrome.replace(" Safari", " EditXspace/1 Safari")}`, "Edit.space")).toContain("EditXspace/1")
 })

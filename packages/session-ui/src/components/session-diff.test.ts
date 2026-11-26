@@ -132,4 +132,20 @@ describe("session diff", () => {
     expect(text(view, "deletions")).toBe("")
     expect(text(view, "additions")).toBe("")
   })
+
+  test("a row whose patch Core omitted is marked omitted, so review and turn views show a notice, not its empty diff", () => {
+    const view = normalize({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", patchOmitted: true })
+
+    expect(view).toMatchObject({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", omitted: true })
+    expect(view.fileDiff.additionLines).toHaveLength(0)
+  })
+
+  test("a row with its patch inline is not marked omitted", () => {
+    const patch =
+      "Index: a.ts\n===================================================================\n--- a.ts\t\n+++ a.ts\t\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
+    const view = normalize({ file: "a.ts", patch, additions: 1, deletions: 1, status: "modified", patchOmitted: true })
+
+    expect(view.omitted).toBeUndefined()
+    expect(text(view, "additions")).toBe("one\nthree\n")
+  })
 })

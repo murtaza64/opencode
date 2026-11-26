@@ -1,0 +1,16 @@
+.glasses-page { display: grid; gap: 18px; max-width: 980px; }
+.glasses-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.glasses-connect { padding: 8px 16px; border: 1px solid var(--border); background: var(--accent); color: var(--base); font-weight: 600; cursor: pointer; }
+.glasses-connect[data-connected="true"] { background: var(--surface0); color: var(--text); }
+.glasses-connect:disabled { opacity: 0.6; cursor: default; }
+.glasses-status { color: var(--subtext0); font-size: 13px; flex: 1; min-width: 200px; }
+.glasses-latency { color: var(--overlay1); font-family: var(--font-mono); font-size: 11px; }
+.glasses-lenses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.glasses-lens { display: grid; gap: 6px; }
+.glasses-lens figcaption { color: var(--overlay1); font-size: 11px; }
+.glasses-lens canvas { width: 100%; height: auto; aspect-ratio: 4 / 3; background: #000; border: 1px solid var(--border); display: block; }
+.glasses-controls { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+.glasses-slider { display: grid; gap: 4px; font-size: 12px; color: var(--subtext0); min-width: 200px; }
+.glasses-slider input { accent-color: var(--accent); }
+@media (max-width: 720px) { .glasses-lenses { grid-template-columns: 1fr; } }
+.glasses-check { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--subtext0); }

@@ -5,7 +5,8 @@ import type { AttentionOption, AttentionRecord } from "../attention"
 import { host } from "../host"
 import { secretFieldAvailable, secretMissing, submitSecret, type SecretInput } from "../secret-field"
 
-export const SecretField = (props: { id: string; record: AttentionRecord; option: AttentionOption; spec: SecretInput; disabled: boolean; onDelivered: () => void; send?: typeof fetch }) => {
+/** `inline`: under a direct card's buttons, one row of fields with a Save beside them; a single field takes the spec's label. */
+export const SecretField = (props: { id: string; record: AttentionRecord; option: AttentionOption; spec: SecretInput; disabled: boolean; onDelivered: () => void; send?: typeof fetch; inline?: boolean }) => {
   const inputs: Record<string, HTMLInputElement> = {}
   const [filled, setFilled] = createSignal<Record<string, boolean>>({})
   const [busy, setBusy] = createSignal(false)
@@ -39,26 +40,28 @@ export const SecretField = (props: { id: string; record: AttentionRecord; option
     setMessage(outcome.message)
     setClosed(outcome.final)
   }
+  const single = () => !!props.inline && props.spec.fields.length === 1
   return <Show when={secretFieldAvailable(window.location, host()?.remote === true)} fallback={
     <p class="home-input-problem" role="status" data-secret-unavailable>This asks for a secret. Answer it in the app on the computer that asked; it cannot be sent from here.</p>}>
-    <fieldset class="home-input home-secret" data-kind="secret" disabled={props.disabled || busy() || closed()} aria-describedby={`${props.id}-secret-note`}>
-      <legend dir="auto">{props.spec.label}</legend>
-      <For each={props.spec.fields}>{field => <label class="home-secret-field">
-        <span dir="auto">{field.label}</span>
+    <fieldset class="home-input home-secret" classList={{ "home-secret-inline": !!props.inline }} data-kind="secret" disabled={props.disabled || busy() || closed()} aria-describedby={`${props.id}-secret-note`}>
+      <legend dir="auto" classList={{ "sr-only": single() }}>{props.spec.label}</legend>
+      <div class="home-secret-row"><div class="home-secret-fields"><For each={props.spec.fields}>{field => <label class="home-secret-field">
+        <span dir="auto">{single() ? props.spec.label : field.label}</span>
         <input ref={element => { inputs[field.id] = element }} id={`${props.id}-${field.id}`} type="password" name={`secret-${field.id}`}
           autocomplete="off" autocapitalize="off" spellcheck={false} data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
           onInput={event => setFilled(current => ({ ...current, [field.id]: !!event.currentTarget.value.trim() }))}
           onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void submit() } }} />
-      </label>}</For>
-      <p class="home-muted" id={`${props.id}-secret-note`} dir="auto">
+      </label>}</For></div>
+      <Show when={props.inline}><button type="button" class="home-primary" disabled={!!missing() || busy() || closed() || props.disabled} onClick={() => void submit()}>{busy() ? "Saving…" : "Save"}</button></Show></div>
+      <p class="home-muted home-secret-note" id={`${props.id}-secret-note`} dir="auto">
         <Show when={props.spec.hint} fallback="Sent once, directly to the approved program on this computer. It is not saved, shown to the agent or recorded.">{hint => hint()}</Show>
       </p>
-      <div class="home-actions">
+      <Show when={!props.inline}><div class="home-actions">
         <button type="button" class="home-primary" disabled={!!missing() || busy() || closed() || props.disabled} onClick={() => void submit()}>
           {busy() ? "Sending securely…" : "Submit securely"}
         </button>
         <Show when={missing() && !closed()}><span class="home-muted">Add {missing()!.toLowerCase()}</span></Show>
-      </div>
+      </div></Show>
     </fieldset>
     <Show when={message()}><p class="home-input-problem" role="status" dir="auto" data-secret-outcome>{message()}</p></Show>
   </Show>

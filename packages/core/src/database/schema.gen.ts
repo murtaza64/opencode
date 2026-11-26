@@ -233,6 +233,7 @@ export default {
           \`time_archived\` integer,
           \`time_turn_started\` integer,
           \`time_turn_ended\` integer,
+          \`last_message\` text,
           CONSTRAINT \`fk_session_project_id_project_id_fk\` FOREIGN KEY (\`project_id\`) REFERENCES \`project\`(\`id\`) ON DELETE CASCADE
         );
       `)

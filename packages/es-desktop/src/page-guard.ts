@@ -2,12 +2,23 @@
  * script and before any user input, and exposes nothing to the page. It watches trusted input, takes one baseline when
  * the load has settled with no input, and answers reads from the same world (`__esPageGuard.read()`, see
  * page-guard-core.ts) with counts only. A new document starts over; a page that was already loaded gets no baseline. */
-import { guardResult, hashValue, SETTLE_MS, type Entry, type Snapshot, type Unsupported } from "./page-guard-core"
+import { guardResult, hashValue, SETTLE_MS, type CurrentState, type Entry, type Snapshot, type Unsupported } from "./page-guard-core"
 
 // Not form state a restart can lose (hidden, buttons) or covered by its own unsupported flag (password, file).
 const SKIP = new Set(["hidden", "password", "file", "submit", "button", "image", "reset"])
 const generation = crypto.randomUUID()
-const state: { baseline?: Snapshot & { url: string }; interactedBeforeBaseline: boolean; interacted: boolean } = { interactedBeforeBaseline: false, interacted: false }
+const state: { baseline?: Snapshot & { url: string }; interactedBeforeBaseline: boolean; interacted: boolean; lastEdit: number; submitting: boolean } =
+  { interactedBeforeBaseline: false, interacted: false, lastEdit: -Infinity, submitting: false }
+// Controls the user has edited: the value each held before its first trusted edit. A field the user typed into is dirty
+// while it still holds text (an app that sends and clears it makes it clean); a checkbox, radio or select while it differs
+// from its value before that first edit.
+const edited = new WeakMap<Element, string>()
+type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+const valueOf = (element: Control) => element instanceof HTMLSelectElement ? Array.from(element.selectedOptions, (option) => option.value).join("\n")
+  : element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? `${element.checked}:${element.value}`
+  : element.value
+const controls = () => Array.from(document.querySelectorAll<Control>("input, textarea, select"))
+  .filter((element) => visible(element) && !(element instanceof HTMLInputElement && SKIP.has(element.type)))
 
 const visible = (element: Element) => element.getClientRects().length > 0
 // Visible form controls and their state: text value, checked for checkboxes and radios, the selected options of a select.
@@ -19,10 +30,7 @@ const fields = (): Entry[] => {
       const base = `${element.tagName}:${element instanceof HTMLTextAreaElement ? "textarea" : element.type}:${element.name || element.id}`
       const ordinal = seen.get(base) ?? 0
       seen.set(base, ordinal + 1)
-      const value = element instanceof HTMLSelectElement ? Array.from(element.selectedOptions, (option) => option.value).join("\n")
-        : element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? `${element.checked}:${element.value}`
-        : element.value
-      return { key: `${base}:${ordinal}`, hash: hashValue(value) }
+      return { key: `${base}:${ordinal}`, hash: hashValue(valueOf(element)) }
     })
 }
 const session = (): Entry[] => {
@@ -46,12 +54,36 @@ const unsupported = (): Unsupported => {
   }
 }
 
+const current = (): CurrentState => ({
+  dirtyFields: controls().filter((element) => {
+    if (!edited.has(element)) return false
+    const text = !(element instanceof HTMLSelectElement) && !(element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type))
+    return text ? element.value.length > 0 : valueOf(element) !== edited.get(element)
+  }).length,
+  quietMs: Math.round(performance.now() - state.lastEdit),
+  loading: document.readyState !== "complete",
+  submitting: state.submitting,
+  dialogs: document.querySelectorAll("dialog[open], [aria-modal=true]").length,
+})
+
 for (const type of ["beforeinput", "input", "change", "compositionstart", "paste", "drop", "cut"])
   window.addEventListener(type, (event) => {
     if (!event.isTrusted) return
     state.interacted = true
+    state.lastEdit = performance.now()
     if (!state.baseline) state.interactedBeforeBaseline = true
+    const target = event.composedPath()[0]
+    // The value before this first edit: beforeinput fires before the change; for later events it is the best known.
+    if ((target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) && !edited.has(target))
+      edited.set(target, type === "beforeinput" ? valueOf(target) : "")
   }, { capture: true })
+// A form submitted for real (not handled by the page script) leaves this document only when the response arrives; until
+// then a restart would cut it off. A submission the page script handles in place is judged by the quiet window instead.
+window.addEventListener("submit", (event) => {
+  if (!event.isTrusted) return
+  state.lastEdit = performance.now()
+  setTimeout(() => { if (!event.defaultPrevented) state.submitting = true })
+}, { capture: true })
 
 window.addEventListener("load", () => setTimeout(() => {
   if (state.interactedBeforeBaseline) return
@@ -62,6 +94,6 @@ Object.defineProperty(globalThis, "__esPageGuard", {
   value: Object.freeze({
     version: 1,
     read: () => guardResult({ generation, baseline: state.baseline, interactedBeforeBaseline: state.interactedBeforeBaseline, interacted: state.interacted,
-      url: location.href, current: { fields: fields(), session: session() }, unsupported: unsupported() }),
+      url: location.href, current: { fields: fields(), session: session() }, unsupported: unsupported(), state: current() }),
   }),
 })

@@ -54,11 +54,9 @@ try {
   await record().locator(".home-details > summary").click()
   await expect(record().locator("pre")).toContainText('"revision": 1')
   // Selecting an option is the answer. A stale revision cannot overwrite a newer producer update.
-  await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   preview.ledger.records[0].revision++
-  await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
+  await record().getByRole("button", { name: /^Small scope/ }).click()
   await expect(notices(page).locator(".home-notice")).toContainText("record changed")
-  await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   preview.ledger.operator = false
   let dropResponse = true
   await context.route("**/es/api/attention/*/commands?*", async route => {
@@ -66,7 +64,7 @@ try {
     if (dropResponse && response.status() === 200) { dropResponse = false; await route.abort("failed"); return }
     await route.fulfill({ response })
   })
-  await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
+  await record().getByRole("button", { name: /^Small scope/ }).click()
   await expect(notices(page).locator(".home-notice")).toContainText("Outcome unknown")
   await notices(page).getByRole("button", { name: "Retry same action", exact: true }).click()
   await expect(notices(page).locator(".home-notice")).toContainText("Answer saved")
@@ -131,9 +129,9 @@ try {
   await expect(item("قرار التنفيذ")).toHaveCount(1)
   await page.setViewportSize({ width: 760, height: 1000 })
   expect(await page.locator("main.desk").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
-  // Persistent nav: Agent map and Decisions & inbox are always one click away; Decisions returns to the
-  // selected item, and a session draft survives the round trip. Narrow windows open the chat as a sheet;
-  // close it to reach the list.
+  // Persistent quick row: Agent map is one click away; a decision deep link returns to the selected item,
+  // and a session draft survives the round trip. Narrow windows open the chat as a sheet; close it to reach
+  // the list.
   if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-companion.sheet:not(.closed)")).toHaveCount(0)
   await item("قرار التنفيذ").click()
@@ -142,7 +140,7 @@ try {
   await expect(page).toHaveURL(`${preview.url}/agents`)
   await page.locator(".sidebar .pinned-section").getByRole("link", { name: /^Composer fixture/ }).first().click()
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Draft survives navigation; do not send")
-  await nav.getByRole("link", { name: /^Decisions & inbox/ }).click()
+  await page.goto(deskURL, { waitUntil: "domcontentloaded" })
   await expect(page).toHaveURL(deskURL)
   await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
   await expect(page.locator(".desk-evidence")).toContainText("قرار التنفيذ")
@@ -169,7 +167,7 @@ try {
   await readOnly.goto(preview.url)
   await expect(notices(readOnly).locator(".home-login")).toContainText("Read-only")
   await needsRow(readOnly, "قرار التنفيذ").click()
-  await expect(readOnly.locator(".home-decision").first().getByRole("button", { name: "Send answer" })).toBeDisabled()
+  await expect(readOnly.locator('[data-attention-id="other_decision"]').getByRole("button", { name: "Send answer", exact: true })).toBeDisabled()
   await readOnly.close()
   console.log("PASS attention on Front desk: explicit choices/CAS/ambiguous retry, not-sent/resolved/snoozed history, partial/offline sources, exact source disappearance, persistent nav with return to the selected item, no generated fleet summaries, RTL/mixed text, session/draft navigation, /desk redirect, no runtime writes")
 } finally { await browser.close(); await preview.close() }

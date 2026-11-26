@@ -22,9 +22,25 @@ export type GuardResult = {
   ssChanged: number
   ssRemoved: number
   unsupported: Unsupported
+  /** The page's state now, independent of the load baseline (v1 readers ignore it). */
+  current: CurrentState
+  /** Whether a restart may proceed without asking: the load baseline shows no loss, or (re-baselined on the page's
+   * current state) no field holds user text a restart would lose, no input for QUIET_MS, nothing loading or submitting
+   * and no dialog. Any unsupported input stops it. */
+  admit: boolean
+  /** Which rule admitted or stopped: the load baseline, or the current state ("rebaselined" after browsing). */
+  admitBasis: "baseline" | "current"
+  /** Why `admit` is false (first reason). */
+  holdReason?: "unsupported" | "loss" | "dirty" | "typing" | "loading" | "submitting" | "dialog"
 }
 
+/** What the page shows now: fields holding user-entered values (counts only), time since the last trusted edit, an
+ * unfinished load or form submission, and open modal dialogs. */
+export type CurrentState = { dirtyFields: number; quietMs: number; loading: boolean; submitting: boolean; dialogs: number }
+
 export const SETTLE_MS = 2000
+/** No trusted edit for this long before a current-state admission: typing, a paste or an app reacting to them is over. */
+export const QUIET_MS = 5000
 
 /** Counts of entries added, changed and removed between two lists keyed by `key`. */
 export const diffEntries = (baseline: Entry[], current: Entry[]) => {
@@ -46,15 +62,30 @@ export const guardResult = (input: {
   url: string
   current: Snapshot
   unsupported: Unsupported
+  state: CurrentState
 }): GuardResult => {
   const urlMatch = !!input.baseline && input.baseline.url === input.url
   const reason = input.interactedBeforeBaseline ? "interacted" as const : !input.baseline ? "not-settled" as const : !urlMatch ? "navigated" as const : undefined
   const fields = input.baseline && !reason ? diffEntries(input.baseline.fields, input.current.fields) : { added: 0, changed: 0, removed: 0 }
   const session = input.baseline && !reason ? diffEntries(input.baseline.session, input.current.session) : { added: 0, changed: 0, removed: 0 }
+  const loss = fields.added + fields.changed + fields.removed + session.added + session.changed + session.removed
+  // A valid load baseline with no input since is the original rule. Otherwise (browsed, typed and sent, navigated in the
+  // app) the decision rests on what the page holds now; the load baseline is not consulted.
+  const admitBasis = !reason && !input.interacted ? "baseline" as const : "current" as const
+  const state = input.state
+  const holdReason = Object.values(input.unsupported).some(Boolean) ? "unsupported" as const
+    : admitBasis === "baseline" && loss > 0 ? "loss" as const
+    : state.loading ? "loading" as const
+    : state.submitting ? "submitting" as const
+    : state.dialogs > 0 ? "dialog" as const
+    : admitBasis === "current" && state.dirtyFields > 0 ? "dirty" as const
+    : admitBasis === "current" && state.quietMs < QUIET_MS ? "typing" as const
+    : undefined
   return {
     version: 1, valid: !reason, ...(reason ? { reason } : {}), generation: input.generation, urlMatch, interacted: input.interacted,
     fieldsAdded: fields.added, fieldsChanged: fields.changed, fieldsRemoved: fields.removed,
     ssAdded: session.added, ssChanged: session.changed, ssRemoved: session.removed, unsupported: input.unsupported,
+    current: state, admit: !holdReason, admitBasis, ...(holdReason ? { holdReason } : {}),
   }
 }
 

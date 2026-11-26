@@ -83,7 +83,7 @@ export function SessionReviewV2Sidebar(props: SessionReviewV2SidebarProps) {
           style={{ width: `${width()}px` }}
         >
           <div data-slot="session-review-v2-sidebar-header">
-            <div data-slot="session-review-v2-sidebar-title">{props.title}</div>
+            <div data-slot="session-review-v2-sidebar-title" data-select-host>{props.title}</div>
             {props.stats}
           </div>
           <div data-slot="session-review-v2-sidebar-filter">

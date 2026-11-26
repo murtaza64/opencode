@@ -166,6 +166,26 @@ export class McpServerNotFoundError extends Schema.TaggedErrorClass<McpServerNot
   { httpApiStatus: 404 },
 ) {}
 
+export class McpToolNotAllowedError extends Schema.TaggedErrorClass<McpToolNotAllowedError>()(
+  "McpToolNotAllowedError",
+  {
+    server: Schema.String,
+    tool: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class McpToolCallError extends Schema.TaggedErrorClass<McpToolCallError>()(
+  "McpToolCallError",
+  {
+    server: Schema.String,
+    tool: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 502 },
+) {}
+
 export class PtyNotFoundError extends Schema.TaggedErrorClass<PtyNotFoundError>()(
   "PtyNotFoundError",
   {

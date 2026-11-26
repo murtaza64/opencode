@@ -1,4 +1,6 @@
 @import "@opencode-ai/ui/styles/tailwind";
+/* packages/app renders none of es-app's markup; its own utilities (some with `:has()`) stay out of this sheet. */
+@source not "../../app";
 @import "@opencode-ai/session-ui/styles";
 @import "tw-animate-css";
 
@@ -218,8 +220,6 @@
 .pending-hint { color: var(--subtext0); font-size: 10px; }
 /* Outgoing inputs: bubbles keep their place across state changes; only the one-line cue changes. */
 .outgoing:empty { display: none; }
-.float-outgoing { flex-shrink: 0; max-height: 30%; overflow-y: auto; padding-inline: 12px; }
-.float-outgoing:has(> .outgoing:empty) { display: none; }
 .outgoing-list { list-style: none; margin: 0; padding: 0; }
 .pending-msg :is(.attachments, [role="group"]) { justify-content: flex-end; }
 .pending-msg[data-status="unknown"] .pending-bubble { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); }
@@ -249,6 +249,14 @@
 @media (prefers-reduced-motion: reduce) { .busy-dot[data-animate]::after, .sidebar .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; } }
 /* transcript tail while waiting for first output */
 .thinking { display: flex; padding: 10px 4px; }
+.session-spinner, .session-work-status[data-state="working"] .dot.busy, .session-work-status[data-state="retry"] .dot.busy { flex: none; inline-size: 11px; block-size: 11px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--surface1); border-block-start-color: var(--accent); background: none; box-shadow: none; animation: es-sidebar-spin .9s linear infinite; }
+.session-work-status .dot.busy::after { display: none; }
+@media (prefers-reduced-motion: reduce) { .session-spinner, .session-work-status .dot.busy { animation: none !important; } }
+.session-followups { display: flex; align-items: flex-start; flex-wrap: wrap; column-gap: 8px; padding-inline: 12px; }
+.session-followups > .mail-wake-bar { margin-inline-start: auto; padding-inline: 0; }
+.session-followups-todos { position: relative; color: var(--subtext0); font: 12px/1.5 var(--font-sans); }
+.session-followups-todos summary { cursor: pointer; padding-block: 2px; }
+.session-followups-list { position: absolute; z-index: 4; inset-block-end: 100%; inset-inline-start: 0; inline-size: min(320px, 70vw); max-block-size: 240px; overflow: auto; border: 1px solid var(--surface1); background: var(--mantle); padding: 8px; }
 
 /* ticket refs (SD-123, dotfiles#77) wrapped in the transcript: subtle
  * affordance, hover card with tracker info */
@@ -464,7 +472,7 @@ button.selected { background: var(--crust); color: var(--green); box-shadow: ins
 /* shell: fixed viewport, columns scroll independently */
 .shell { display: flex; height: 100vh; }
 .content { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; }
-.content:has(.session-page) { overflow: hidden; }
+.content[data-session-page] { overflow: hidden; }
 main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 
 /* left sidebar */
@@ -627,7 +635,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .session-entry, .nav-item.archived { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .session-entry .nav-item { flex: 1; min-width: 0; }
 /* A pinned session that handed off: its successor on the second line, under the title. */
-.session-entry:has(> .handoff-next-link) { flex-wrap: wrap; contain-intrinsic-size: auto 44px; }
+.session-entry[data-handed-off] { flex-wrap: wrap; contain-intrinsic-size: auto 44px; }
 .handoff-next-link { flex-basis: 100%; min-width: 0; padding-inline: 28px 8px; padding-block-end: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
 .handoff-next-link:hover { color: var(--accent); }
 .pin-action {
@@ -667,7 +675,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .sidebar-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 4px; padding: 0 10px 6px 0; margin-bottom: 4px; border-bottom: 1px solid var(--surface0); }
 .sidebar-actions .sidebar-map-link { grid-column: 1 / -1; }
-.sidebar-actions:not(:has(.board-link)) { justify-content: flex-end; }
 .sidebar-actions .board-link { flex: 1; min-width: 0; }
 .board-link { font-weight: bold; color: var(--text); }
 .new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
@@ -898,6 +905,8 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   position: relative;
 }
 .dot.pending { background: var(--peach); }
+/* Another host's status could not be read: neither busy nor idle. */
+.dot.unknown { background: transparent; border: 1px dashed var(--overlay0); box-sizing: border-box; }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-block-size: 28px; padding: 6px 0; box-sizing: border-box; white-space: nowrap; font-size: 12px; color: var(--subtext0); }
 .session-work-status > span:not(.busy-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
 /* The reconnect action must fit the slot so a connection change never resizes it. */
@@ -1077,8 +1086,8 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   &[data-open] .activity-disclosure { transform: rotate(90deg); }
   .todo-list { padding: 2px 10px 8px; }
 }
-/* Mail chips: one content-sized line on the side of whoever it belongs to. Incoming (delivered to this
- * session) sits inline-end like the person's messages; outgoing and unknown sit inline-start. */
+/* Mail chips: one content-sized line at the inline end, like sent chat bubbles, for every direction. The direction
+ * glyph is the trailing item; an unread chip's wake line sits under the title, aligned to the same edge. */
 .mail-activity {
   scroll-margin-block-start: 12px;
   inline-size: fit-content;
@@ -1088,10 +1097,12 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   color: var(--subtext1);
   font: 13px/1.5 var(--font-sans);
 }
-.mail-activity[data-direction=in] { margin-inline-start: auto; }
+.mail-activity { margin-inline-start: auto; }
 .mail-activity-summary {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
   gap: 6px;
   inline-size: fit-content;
   max-inline-size: 100%;
@@ -1105,7 +1116,8 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   list-style: none;
   cursor: pointer;
 }
-.mail-activity[data-direction=in] > .mail-activity-summary { margin-inline-start: auto; }
+.mail-activity > .mail-activity-summary { margin-inline-start: auto; }
+.mail-activity-head { display: flex; align-items: center; gap: 6px; min-inline-size: 0; max-inline-size: 100%; }
 .mail-activity-summary::-webkit-details-marker { display: none; }
 .mail-activity-summary:hover { background: var(--surface1); }
 .mail-activity-summary:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 1px; }
@@ -1115,14 +1127,28 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity[data-direction=unknown] .mail-activity-summary { color: var(--subtext0); }
 .mail-activity-party { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
 .mail-activity-party .mail-party { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
-.mail-activity-wake { display: inline-flex; flex: none; margin-inline-end: -2px; }
+.mail-activity-wake { display: inline-flex; flex: none; margin-inline-start: -2px; }
 .mail-activity-wake[data-wake=caused] { color: var(--accent, var(--lavender)); }
 .mail-activity-wake[data-wake=unknown] { color: var(--overlay1); }
 .mail-activity-summary[data-wake=caused] .mail-activity-party { font-weight: 600; }
 .mail-activity-summary[data-wake=none] .mail-activity-party, .mail-activity-summary[data-wake=none] .mail-activity-purpose,
 .mail-activity-summary[data-wake=unknown] .mail-activity-party, .mail-activity-summary[data-wake=unknown] .mail-activity-purpose { color: var(--overlay1); }
+/* Mail ticks + unread (Loupe mail-ticks.md): the tick is the chip's last glyph; unread is a 6px accent dot at
+   inline-start, a bolder sender and, when known, one line on the agent's next wake. */
+.mail-activity-head > .msg-tick { margin-inline-start: 2px; }
+.mail-activity-summary[data-unread] .mail-activity-party { font-weight: 600; }
+.mail-unread-wake { max-inline-size: 100%; padding-inline-end: 22px; text-align: end; color: var(--subtext0); font-size: 12px; line-height: 16px; white-space: normal; }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
-.mail-activity-purpose { flex: none; }
+/* One per session above the composer while unread mail exists: "3 unread · Wake now". */
+.mail-wake-bar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 2px 12px; color: var(--subtext0); font: 12px/1.5 var(--font-sans); }
+.mail-wake-count { color: var(--text); font-weight: 600; }
+.mail-wake-sep { color: var(--overlay1); }
+.mail-wake-now { padding: 0; border: 0; background: none; color: var(--accent, var(--lavender)); font: inherit; cursor: pointer; }
+.mail-wake-now:disabled { color: var(--subtext0); cursor: default; }
+.mail-wake-now:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 2px; border-radius: 2px; }
+.mail-wake-error, .mail-wake-blocked { color: var(--red); }
+/* A fixed kind column (the longest kind is "Question"), so every title truncates at the same width. */
+.mail-activity-purpose { flex: none; inline-size: 8ch; overflow: hidden; text-overflow: ellipsis; }
 .mail-activity-status { flex: none; color: var(--peach); }
 .mail-activity-status[data-status=Failed], .mail-activity-status[data-status="Not delivered"] { color: var(--red); }
 .mail-route { display: flex; align-items: baseline; gap: 0; min-width: 0; white-space: nowrap; }
@@ -1199,10 +1225,23 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   font-size: 12px;
   color: var(--subtext1);
 }
-[data-component="dialog-overlay"]:has(+ [data-dialog-layer] .subagent-transcript-dialog) {
+/* Continuous transcript: earlier sessions above the open one, one thin rule at each handoff. */
+.handoff-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block: 12px;
+  font-size: 11px;
+  color: var(--subtext0);
+}
+.handoff-rule::before, .handoff-rule::after { content: ""; flex: 1; border-block-start: 1px solid var(--surface1); }
+.handoff-rule > span { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.earlier-session-status { margin-block: 8px; text-align: center; font-size: 12px; color: var(--subtext1); }
+.earlier-session-plumbing > summary { cursor: pointer; font-size: 11px; color: var(--subtext0); }
+[data-component="dialog-overlay"][data-subagent-transcript] {
   background: color-mix(in srgb, var(--crust) 65%, transparent);
 }
-[data-component="dialog"]:has(.subagent-transcript-dialog) {
+[data-component="dialog"][data-subagent-transcript] {
   [data-slot="dialog-container"] {
     width: min(calc(100vw - 24px), 980px);
     height: min(calc(100dvh - 48px), 800px);
@@ -1294,25 +1333,39 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   }
 }
 @media (max-width: 600px) {
-  [data-component="dialog"]:has(.subagent-transcript-dialog) {
+  [data-component="dialog"][data-subagent-transcript] {
     [data-slot="dialog-container"] { width: calc(100vw - 16px); height: calc(100dvh - 24px); }
     .subagent-transcript-dialog [data-slot="dialog-close-button"] { width: 44px; height: 44px; }
   }
 }
 
-/* TUI-style turn footer on the agent (start) side: ▣ Agent · model · duration [· interrupted].
- * Quiet metadata: no rule, so turns separate by spacing rather than chrome. */
+/* One quiet turn footer on the agent (start) side: time · agent · model · duration, plus a state icon only for a
+ * turn that did not finish cleanly. It rides the Copy row when the turn ends in agent text; a tool-only or silent end
+ * keeps its own row. No success mark. */
 .turn-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   text-align: start;
-  color: var(--subtext0);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  margin: 4px 0 18px;
+  color: var(--text-weak, var(--subtext0));
+  font-size: 12px;
+  font-family: var(--font-sans);
+  margin: 0;
 }
-.turn-summary .marker { color: var(--mauve); }
+.turn-meta { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-summary[data-standalone] { display: flex; margin: 4px 0 18px; }
 .turn-summary .agent { color: var(--text); }
-.turn-summary.interrupted .marker,
-.turn-summary.interrupted .agent { color: var(--overlay0); }
+.turn-summary .turn-time { color: var(--subtext0); }
+.turn-state { display: inline-flex; align-items: center; color: var(--overlay1); }
+.turn-state[data-state="interrupted"] { color: var(--yellow); }
+.turn-state[data-state="error"] { color: var(--red); }
+.turn-state[data-state="cancelled"] { color: var(--overlay1); }
+.turn-copy { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: var(--subtext0); cursor: pointer; }
+.turn-copy:hover { color: var(--text); }
+/* A tap on the turn reveals the Copy row on touch, where hover never arrives. */
+.transcript [data-touch-reveal] [data-slot="text-part-copy-wrapper"] { opacity: 1; pointer-events: auto; }
 /* System provenance, not a message: a single dim line, never a bubble. */
 .restart-marker {
   color: var(--overlay1);
@@ -1344,11 +1397,15 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   background: var(--surface0);
   color: var(--text);
   padding: 10px 12px;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 30vh;
-  overflow-y: auto;
 }
+.conversation-error > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; font-size: 12px; color: var(--text); }
+.conversation-error > summary::-webkit-details-marker { display: none; }
+.conversation-error-cause { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-error-details { margin-inline-start: auto; flex: none; color: var(--subtext0); font-size: 11px; text-decoration: underline; text-underline-offset: 2px; }
+.conversation-error-detail { margin-block-start: 8px; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--subtext1); font: 11px/1.5 var(--font-mono); }
+.conversation-error-detail:focus-visible { outline: 1px solid var(--lavender); outline-offset: 2px; }
 
 /* right info panel: one recessed sidebar, sections split by headings only */
 .session-info {
@@ -1599,6 +1656,11 @@ textarea { caret-color: var(--lavender); }
 textarea.vim-normal { caret-color: transparent; }
 textarea.vim-normal::selection { background: var(--lavender); color: var(--crust); }
 .ta-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
+/* Keyboard mode while the composer has focus (dotfiles#254): quiet, in the corner, never over the text's first line. */
+.kbd-mode { position: absolute; inset-block-end: 4px; inset-inline-end: 8px; padding: 0 4px; border-radius: 3px; font: 600 10px/14px var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; color: var(--subtext0); background: var(--mantle); pointer-events: none; }
+.kbd-mode[data-mode="normal"] { color: var(--crust); background: var(--lavender); }
+.transcript:focus { outline: none; }
+.transcript:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -2px; }
 .ta-wrap textarea { width: 100%; }
 /* Outer box covers the fixed-width @ses_ token's glyphs with the textarea's
  * own background; the pill inside sizes to its content. */
@@ -1612,7 +1674,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-chip[data-unknown] .session-chip-pill { color: var(--subtext0); background: var(--surface0); border-color: var(--surface1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
 .session-chip[data-unknown] .session-chip-dot { background: var(--surface1); }
 .session-chip[data-unknown] .session-chip-title { font-weight: 400; }
-.prompt-box:has(.context-picker), .float-editor > .direct-composer:has(.context-picker) { overflow: visible; }
+.prompt-box[data-context-picker], .float-editor > .direct-composer[data-context-picker] { overflow: visible; }
 .context-picker { position: absolute; inset-inline-start: 0; bottom: 100%; z-index: 55; inline-size: min(560px, 100%); max-block-size: min(340px, 45vh);
   display: grid; grid-template-columns: minmax(0, 1fr) 210px; grid-template-rows: minmax(0, 1fr) auto; background: var(--crust);
   border: 1px solid var(--surface1); border-radius: 2px; box-shadow: 0 12px 30px -10px rgba(0,0,0,0.7); font-size: 12px; overflow: hidden; }
@@ -2049,8 +2111,8 @@ a.mini-item > .glyph { margin: 0; }
 .mail-kind[data-kind=notice] { color: var(--blue); }
 .mail-kind[data-kind=learning] { color: var(--mauve); }
 /* Session state in the header uses the sidebar's status colours. */
-.session-state::before { content: ""; display: inline-block; inline-size: 7px; block-size: 7px; margin-inline-end: 6px; vertical-align: 1px; background: var(--overlay0); }
-.session-state[data-state=working]::before, .session-state[data-state=retry]::before { background: var(--lavender); }
+/* The header's state is the sidebar dot (.dot classes); no square marker. */
+.session-page .topbar .session-state.dot { overflow: visible; }
 .session-state[data-state=working], .session-state[data-state=retry] { color: var(--lavender); }
 .session-state[data-state=waiting]::before { background: var(--peach); }
 .session-state[data-state=waiting] { color: var(--peach); }
@@ -2097,8 +2159,147 @@ a.mini-item > .glyph { margin: 0; }
 .mode-busy { position: absolute; inset-inline-end: calc(100% + 6px); inset-block-start: 50%; translate: 0 -50%; inline-size: 6px; block-size: 6px; }
 .mode-switch.compact .mode-busy { position: absolute; inset-block-start: 4px; inset-inline-start: 4px; margin: 0; }
 /* A mail chip sits at inline-end; its fork action moves to the free side so it never covers the chip. */
-.msg-wrap:has(> .mail-activity) .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }
+.msg-wrap[data-mail-activity] .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }
 
 /* Another Work host's session in the normal view: its host beside the title, one line while it does not answer. */
 .session-page .topbar .session-host { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
 .host-session-offline { padding: 4px 16px; font-size: 12px; color: var(--subtext0); }
+
+/* Message ticks (DOUBLE-TICK): grey for sending, sent and delivered; accent once read; red when not sent. Mail sent
+ * rows use the mail role colour (the mail glyph's teal) so they are never read as the person's own messages. */
+.msg-tick { display: inline-flex; flex: none; align-items: center; color: var(--overlay1); }
+.msg-tick[data-tick="read"] { color: var(--accent, var(--lavender)); }
+.msg-tick[data-tick="failed"] { color: var(--red); }
+.msg-tick[data-mail] { color: var(--teal); }
+.msg-tick[data-mail][data-tick="failed"] { color: var(--red); }
+/* One place per bubble: the tick sits just below the bubble's inline-end corner, in a 16px line, in every state.
+ * An outgoing bubble's cue and actions flow to the tick's inline-start, so actions appearing never move it. */
+.msg-tick-row { display: flex; justify-content: flex-end; align-items: center; min-block-size: 16px; margin-block-start: 2px; }
+/* Context a prompt carried (CONTEXT-LINE): one quiet line per attached item under the bubble, aligned with the tick's
+ * inline-end. No box and no chip border: it is a note about the message, not another message. */
+.msg-context-lines { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; margin-block-start: 3px; max-inline-size: 100%; }
+.msg-context { display: flex; align-items: baseline; gap: 4px; margin: 0; max-inline-size: 100%; font-size: 12px; line-height: 1.5; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-context a { color: inherit; text-decoration: none; display: inline-flex; align-items: baseline; gap: 4px; min-inline-size: 0; max-inline-size: 100%; }
+.msg-context a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.msg-context a:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; border-radius: 2px; }
+.msg-context-lead { flex: none; color: var(--overlay1); }
+.msg-context bdi { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.msg-context-rev { flex: none; font-variant-numeric: tabular-nums; }
+.msg-context-go { flex: none; color: var(--overlay0); }
+.msg-context-more { color: var(--overlay1); }
+/* The message's tick shares the last context row, so the context adds no row of its own below the bubble. */
+.msg-context-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; max-inline-size: 100%; min-block-size: 16px; }
+.msg-context-row > .msg-context { min-inline-size: 0; }
+.msg-context-tick { display: inline-flex; flex: none; align-items: center; block-size: 16px; }
+.receipt-line { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; max-inline-size: 100%; }
+.receipt-line > .outgoing-cue { flex: 0 1 auto; min-inline-size: 0; }
+:is(.msg-tick-row, .receipt-line) > .msg-tick { block-size: 16px; }
+/* A transcript user message's boxes join its row, so its tick comes right after the bubble and before the
+ * hover-only copy line (which keeps its space while hidden and would otherwise push the tick down). */
+.msg-wrap[data-tick-row] { display: flex; flex-direction: column; align-items: flex-end; }
+.msg-wrap[data-tick-row] > [data-component="user-message"] { display: contents; }
+.msg-wrap[data-tick-row] > [data-component="user-message"] > [data-slot="user-message-copy-wrapper"] { order: 1; }
+@media (prefers-reduced-motion: no-preference) { .msg-tick { transition: color 150ms; } }
+.tool-chip-partial { margin: 2px 0 4px; padding-inline-start: 28px; }
+.tool-chip-partial-label { display: block; font-size: 12px; color: var(--subtext0); }
+.tool-chip-partial pre { margin: 2px 0 0; max-block-size: 16rem; overflow: auto; font: 400 12px/18px var(--font-mono); color: var(--subtext1); white-space: pre-wrap; }
+/* Images and files a tool returned (compact pages load them from their own route when shown); full output on request. */
+.tool-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; padding-inline-start: 28px; }
+.tool-attachments img { max-inline-size: min(100%, 480px); max-block-size: 320px; border-radius: 4px; border: 1px solid var(--surface1); object-fit: contain; }
+.tool-full-output { margin: 2px 0 4px; padding-inline-start: 28px; font-size: 12px; }
+
+/* Chat activity (chat-activity-thinking-split): the status line's dot animates like the sidebar's busy dot. */
+.session-work-status .dot.busy::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
+/* The running tool call's icon glows gently; finished calls never animate. */
+.tool-run-icon[data-running] { border-radius: 50%; animation: tool-running 1.6s ease-in-out infinite; }
+@keyframes tool-running { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--lavender)) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .session-work-status .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; }
+  .tool-run-icon[data-running] { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--lavender)) 45%, transparent); }
+}
+/* A transcript held for this draft (it arrived while the person was elsewhere): insert or discard, never auto-sent. */
+.dictation-held { display: inline-flex; align-items: center; gap: 4px; max-inline-size: 22rem; padding: 0 6px; border-radius: 6px; background: var(--surface0); font-size: 12px; }
+.dictation-held-text { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
+/* Quiet turns (Front desk chat): routine updates that ended without text, folded into one row. */
+.quiet-turns { display: inline-flex; align-items: center; gap: 6px; margin-block: 2px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--overlay1); font: 400 12px/18px var(--font-sans); cursor: pointer; }
+.quiet-turns:is(:hover, :focus-visible) { background: var(--surface0); color: var(--subtext1); }
+.quiet-turns-disclosure { display: inline-block; transition: transform 150ms; }
+.quiet-turns[aria-expanded="true"] .quiet-turns-disclosure { transform: rotate(90deg); }
+:dir(rtl) .quiet-turns-disclosure { transform: scaleX(-1); }
+@media (prefers-reduced-motion: reduce) { .quiet-turns-disclosure { transition: none; } }
+/* A UTC time in agent prose: the text stays; the hover/description gives the reader's local time. */
+abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+
+/* Entity tokens (chip design r4; ux-feel opencode-mail-tool-review rev 4): text height, glyph + name, state inside. */
+.eref { --c: var(--lavender); position: relative; display: inline-flex; align-items: baseline; gap: .28em; vertical-align: baseline; block-size: 1.45em; line-height: 1.45em;
+  max-inline-size: 24ch; padding: 0 .38em; box-sizing: border-box; border-radius: .38em; background: color-mix(in srgb, var(--c) 13%, transparent); color: var(--text);
+  font-size: 1em; white-space: nowrap; unicode-bidi: isolate; cursor: pointer; text-decoration: none; }
+@media (max-width: 600px) { .eref { max-inline-size: 16ch; } }
+.eref .et { overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+.eref > .g, .eref > .av, .eref .emk, .eref .eh { align-self: center; }
+.eref > .g { inline-size: 1em; block-size: 1em; color: var(--c); flex: none; }
+.eref:hover { background: color-mix(in srgb, var(--c) 24%, transparent); }
+.eref:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 1px; }
+.eref.s .esec { color: var(--subtext0); flex: none; font-size: .92em; }
+.eref.missing { --c: var(--overlay0); background: none; border: 1px dashed var(--overlay0); color: var(--subtext0); }
+.eref.m { --c: var(--blue); background: none; padding-inline: 0 .1em; gap: .3em; font-weight: 600; color: var(--blue); }
+.eref.m:hover { background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.eref.m .av { display: inline-grid; place-items: center; inline-size: 1.85em; block-size: 1.85em; border-radius: 50%; background: var(--surface1); color: var(--text); font-size: .62em; line-height: 1; overflow: hidden; flex: none; }
+.eref.m .av img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.eref.m.me { --c: var(--peach); color: var(--peach); background: color-mix(in srgb, var(--peach) 16%, transparent); padding-inline: .2em .38em; }
+.eref.m.unk { color: var(--subtext0); font-weight: 400; font-style: italic; }
+.eref.d[data-s=open], .eref.d[data-s=snoozed] { --c: var(--peach); }
+.eref.d[data-s=answered] { --c: var(--blue); }
+.eref.d[data-s=resolved] { --c: var(--green); }
+.eref.d[data-s=withdrawn] { --c: var(--overlay0); color: var(--subtext0); }
+.eref.d[data-s=withdrawn] .et { text-decoration: line-through; }
+.eref.d .eans { flex: none; color: var(--c); font-weight: 600; }
+.eref.d .eans::before { content: "· "; color: var(--overlay0); font-weight: 400; }
+.eref .emk { flex: none; inline-size: .42em; block-size: .42em; border-radius: 50%; }
+.eref .emk.warn { background: var(--yellow); }
+.eref .eh { display: inline-flex; color: var(--subtext0); flex: none; }
+.eref .eh .g { inline-size: .95em; block-size: .95em; }
+.eref-card { position: fixed; z-index: 1000; max-inline-size: min(22rem, 90vw); padding: 8px 10px; border-radius: 8px; background: var(--surface0); color: var(--text);
+  box-shadow: 0 4px 16px color-mix(in srgb, black 30%, transparent); font-size: 12px; line-height: 1.4; }
+.eref-card-actions { margin: 6px 0 0; }
+.eref-card-head { display: flex; gap: 8px; align-items: baseline; }
+.eref-card dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; }
+.eref-card dt { color: var(--subtext0); }
+.eref-card dd { margin: 0; }
+.eref-card-preview, .eref-card-foot { margin: 6px 0 0; color: var(--subtext0); }
+/* Phone: the card is a bottom sheet. */
+.eref-card-grab { display: none; }
+@media (max-width: 600px) {
+  .eref-card { inset-inline: 0 !important; inset-block-start: auto !important; inset-block-end: 0; max-inline-size: none; padding: 6px 14px calc(14px + env(safe-area-inset-bottom));
+    border-radius: 12px 12px 0 0; pointer-events: auto; }
+  .eref-card-grab { display: block; inline-size: 36px; block-size: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--overlay0); }
+}
+/* Inside markdown a token replaces a link: no link underline or link colour; round marks under any theme. */
+[data-component="markdown"] a.eref { text-decoration: none; color: var(--text); }
+[data-component="markdown"] a.eref.m { color: var(--blue); }
+.eref .emk, .eref.m .av { border-radius: 50% !important; }
+/* Quiet pending input (pending-steer-actions-hover-only): the cue and actions appear on hover, focus inside the row, a tap,
+ * or while editing; laid out all along (no height change) and still focusable. The tick is never hidden. */
+.outgoing-item[data-quiet] .receipt-quiet { opacity: 0; transition: opacity 120ms; }
+.outgoing-item[data-quiet]:is(:hover, :focus-within, [data-revealed]) .receipt-quiet { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .outgoing-item[data-quiet] .receipt-quiet { transition: none; } }
+
+/* One footer per agent turn: the reply's own meta line (session-ui) repeats agent/model/duration, so es-app hides it. */
+.session-page [data-slot="text-part-meta"] { display: none; }
+.turn-summary .turn-time { color: var(--subtext0); }
+
+/* Expired Access session above the composer: one slim line, the editor stays usable. */
+.access-sign-in { display: flex; align-items: center; gap: 8px; margin-block: 4px; padding: 4px 8px; font-size: 12px;
+  color: var(--subtext1); border-block-start: 1px solid var(--surface1); }
+.access-sign-in > span { flex: 1; min-width: 0; }
+/* Unread wake cue: a bolt; struck through and grey when no wake is coming, accent when one is. */
+.mail-unread-wake[data-cue=on], .mail-unread-wake[data-cue=off] { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 0; font-size: 11px; line-height: 1; }
+.mail-wake-cue { position: relative; display: inline-flex; }
+.mail-unread-wake[data-cue=on] .mail-wake-cue { color: var(--accent, var(--lavender)); }
+.mail-unread-wake[data-cue=off] .mail-wake-cue { color: var(--overlay0); }
+.mail-unread-wake[data-cue=off] .mail-wake-cue::after { content: ""; position: absolute; inset-inline-start: -1px; inset-block-start: 50%; inline-size: calc(100% + 2px); block-size: 1.5px; background: currentColor; border-radius: 1px; transform: rotate(-45deg); }
+.mail-wake-short { font-variant-numeric: tabular-nums; }
+
+/* Desktop test or probe instance: unmistakable, in every window. */
+.test-instance-badge { flex: none; display: inline-flex; align-items: center; margin-inline-end: 8px; padding: 1px 8px; border-radius: 5px; background: var(--red); color: var(--crust); font: 700 11px/18px var(--font-sans); letter-spacing: .04em; white-space: nowrap; max-inline-size: 240px; overflow: hidden; text-overflow: ellipsis; -webkit-app-region: no-drag; }

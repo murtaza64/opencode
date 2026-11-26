@@ -8,7 +8,7 @@ import { contentRevision, type AttentionRecord } from "./attention"
 import contract from "./brief-contract.json"
 import type { HomeRequestRow } from "./home-requests"
 import { failureLabel } from "./session-failures"
-import { memoryLines, type MemoryDocument } from "./desk-memory"
+import { MEMORY_RULES, memoryParts, type MemoryDocument } from "./desk-memory"
 
 export type DeskItem = {
   key: string
@@ -163,6 +163,20 @@ export type BriefShape =
   | { kind: "impact"; rows: { area: string; change: string }[] }
   /** What a choice changes and what it keeps: a row whose now and after are equal stays as it is. */
   | { kind: "change"; rows: { item: string; now: string; after: string }[] }
+/** What a scene part is, by domain role: an actor (`unknown` when the request does not say what kind), a place that
+ * holds things (platform, channel, thread, permission boundary) or an object (message, capability, queue). */
+export type SceneRole = "unknown" | "person" | "app" | "identity" | "platform" | "channel" | "thread" | "boundary" | "message" | "capability" | "queue"
+export const SCENE_ROLES: SceneRole[] = ["unknown", "person", "app", "identity", "platform", "channel", "thread", "boundary", "message", "capability", "queue"]
+/** Who and what a decision involves and how they relate: `in` nests a part inside an earlier one (a thread in a
+ * channel, a role inside an account boundary). `sends` and `requests` are proposals only (an actor would send a
+ * message, an identity requests a capability), never a send, grant or outcome that happened; `uses` is a standing
+ * fact the request states (a workload runs as an identity), which is how a shared identity's reach is drawn. Names, notes, labels and limits are
+ * shown only when quoted exactly from the request (briefScene); an empty name reads as not stated. */
+export type BriefScene = {
+  parts: { id: string; role: SceneRole; name: string; in?: string; note?: string }[]
+  relations: { from: string; to: string; kind: "sends" | "requests" | "uses"; label?: string; option?: string }[]
+  limits: string[]
+}
 /** One numbered or named item from the request (D1…, 1., Q2), kept as its own row. Values are shown only when
  * quoted exactly (briefItems); which answer was chosen comes from the record, never from the brief. */
 export type BriefItem = { id: string; question: string; recommended: string; alternatives: string[]; refs: string[] }
@@ -204,6 +218,8 @@ export type BriefResult = {
   copy: { label: string; to: string; start: string; end: string }[]
   /** At most one picture: a shape the app draws, or the model's own visual. */
   shape?: BriefShape
+  /** Typed parts and relations the app draws by role (not yet requested by the brief contract). */
+  scene?: BriefScene
   sources: BriefSource[]
   facts: { text: string; refs: string[] }[]
   timeline: { when?: string; text: string; refs: string[] }[]
@@ -217,7 +233,6 @@ export type BriefState =
   | { state: "failed"; error: string }
   | { state: "unknown"; reason: string }
 
-const CONTEXT_BUDGET = 10_000
 const clip = (text: string, max: number) => {
   const flat = text.replace(/\s+/g, " ").trim()
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
@@ -254,6 +269,14 @@ export const canonicalLines = (item: DeskItem) => {
 }
 
 /** Small brief for the desk session. Keyed so an unchanged view adds no repeated note. */
+/** One part of the desk's context note. `key` is everything the part states except clock-derived ages, so an
+ * unchanged part stays out of the next note. `none` says the part is now empty. `head` lines go first and are never
+ * split: when they do not fit, the whole part is left out (and not recorded as told). */
+type NoteSection = { name: string; key: string; lines: string[]; none?: string; head?: string[]
+  /** Sent once per desk session and `key` (its seed), never again for that key: content changes apply at the next
+   * session (Porter memory, dotfiles#295: the hot block stays frozen per session so the provider cache holds). */
+  seed?: true }
+
 export const deskContext = (input: {
   now: number
   scope?: string
@@ -268,38 +291,115 @@ export const deskContext = (input: {
   cases?: string[]
 }) => {
   const ready = input.briefs.flatMap(brief => brief.state.state === "ready" ? [{ meta: brief.meta, result: brief.state.result }] : [])
-  // Everything the note states except clock-derived ages, so any queue, revision or source-health
-  // change reaches the model on the next send, and an unchanged view adds nothing.
-  const key = JSON.stringify([
-    input.scope ?? "",
-    input.items.map(item => [item.key, item.revision]),
-    input.sources.map(source => [source.name, source.state, source.detail ?? ""]),
-    input.selected ? [input.selected.key, input.selected.revision] : null,
-    ready.map(brief => brief.meta.requestID),
-    input.memory?.revision ?? 0,
-    input.surface?.id ?? null,
-    input.cases ?? [],
-  ])
-  const lines = [
-    "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing.",
-    `generated: ${new Date(input.now).toISOString()}`,
-    `scope: ${input.scope ?? "all connected projects"}`,
-    "sources:",
-    ...input.sources.map(source => `- ${source.name}: ${source.state}, checked ${ago(input.now, source.checked)}${source.detail ? ` (${source.detail})` : ""}`),
-    `queue (${input.items.length}):`,
-    ...input.items.slice(0, 12).map(item => `- [${item.kind}] ${clip(item.title, 120)} · ${item.project ?? "unknown project"} · ref ${item.key} rev ${item.revision}`),
-    ...(input.items.length > 12 ? [`- … ${input.items.length - 12} more not listed`] : []),
+  // Ordered by what the desk most needs when room runs out: what the human is looking at, then their cases.
+  const sections: NoteSection[] = [
+    { name: "scope", key: hash(input.scope ?? ""), lines: [`scope: ${input.scope ?? "all connected projects"}`] },
+    { name: "selected item", key: hash(input.selected ? [input.selected.key, input.selected.revision] : null), lines: [input.selected
+      ? ["selected item (the human is looking at this now):", ...canonicalLines(input.selected).map(line => `  ${line}`)].join("\n")
+      : "selected item: none. Answer about connected projects generally; do not assume an earlier selection."] },
+    { name: "open surface", key: hash(input.surface?.id ?? null), none: "open surface: none now.",
+      lines: input.surface ? [`open surface: "${clip(input.surface.title, 80)}" (id ${input.surface.id}), maintained by ${input.surface.owner}. You cannot see its content; ask its owner for details.`] : [] },
+    { name: "cases", key: hash(input.cases ?? []), none: "open cases: none now.", lines: input.cases ?? [] },
+    { name: "queue", key: hash(input.items.map(item => [item.key, item.revision])), lines: [`queue (${input.items.length}):`,
+      ...input.items.slice(0, 8).map(item => `- [${item.kind}] ${clip(item.title, 80)} · ${item.project ?? "unknown project"} · ref ${item.key} rev ${item.revision}`),
+      ...(input.items.length > 8 ? [`- … ${input.items.length - 8} more not listed`] : [])] },
+    { name: "sources", key: hash(input.sources.map(source => [source.name, source.state, source.detail ?? ""])),
+      lines: ["sources:", ...input.sources.map(source => `- ${source.name}: ${source.state}, checked ${ago(input.now, source.checked)}${source.detail ? ` (${source.detail})` : ""}`)] },
+    { name: "briefs", key: hash(ready.map(brief => brief.meta.requestID)), none: "derived briefs: none now.",
+      lines: ready.slice(-3).map(brief => `derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`) },
+    (() => { const memory = memoryParts(input.memory, input.scope)
+      // Keyed by scope only: a memory write mid-session changes nothing sent; a new scope seeds its own notes.
+      return { name: "memory", key: hash(["memory", input.scope ?? ""]), head: [memory.title, ...MEMORY_RULES], lines: memory.entries, seed: true as const } })(),
   ]
-  lines.push(input.selected
-    ? ["selected item (the human is looking at this now):", ...canonicalLines(input.selected).map(line => `  ${line}`)].join("\n")
-    : "selected item: none. Answer about connected projects generally; do not assume an earlier selection.")
-  if (input.surface) lines.push(`open surface: "${clip(input.surface.title, 80)}" (id ${input.surface.id}), maintained by ${input.surface.owner}. You cannot see its content; ask its owner for details.`)
-  for (const brief of ready.slice(-3)) lines.push(`derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`)
-  lines.push(...input.cases ?? [])
-  lines.push(...memoryLines(input.memory, input.scope))
-  lines.push("Native answers, permissions and retries happen only through their own controls in the desk UI.")
-  const text = lines.join("\n")
-  return { key, text: text.length > CONTEXT_BUDGET ? `${text.slice(0, CONTEXT_BUDGET - 22)}\n[context truncated]` : text }
+  return { key: hash(sections.map(section => section.key)), text: contextNote(sections, undefined, input.now, { input: true })!.text, sections }
+}
+
+/** What the desk session was last told, per section, so the next note carries only what changed. */
+export type NoteState = { sections: Record<string, string>; full: number; notes: number }
+// A full note now and then, so a compacted or long conversation is never left holding only updates.
+const FULL_EVERY = { ms: 6 * 3_600_000, notes: 12 }
+
+/** The note for the next send. Only a plain send (the model sees it as part of this turn) may carry an update:
+ * a Core input can still be cancelled or promoted late, so it always carries a complete note and records nothing.
+ * Otherwise: complete on first contact or when a refresh is due, else only the sections that changed since the last
+ * accepted note (none changed: nothing). `partial` notes (cases alone, off the Decisions page) never count as a full
+ * refresh. `seq` numbers every note offered, so a late note never overrides a newer one. `state` is what to record
+ * once the send is accepted: absent for input notes; sections left out for size are not in it. */
+export const contextNote = (sections: NoteSection[], previous: NoteState | undefined, now: number,
+  options: { partial?: string; input?: boolean; seq?: number } = {}) => {
+  const complete = !!options.input || !options.partial && (!previous?.full || now - previous.full > FULL_EVERY.ms || previous.notes >= FULL_EVERY.notes)
+  // A seed part already told to this session under its key is never repeated, by updates or full refreshes.
+  const told = (section: NoteSection) => !!section.seed && previous?.sections[section.name] === section.key
+  sections = sections.filter(section => !told(section))
+  const changed = complete ? sections : sections.filter(section => previous?.sections[section.name] !== section.key)
+  if (!changed.length) return undefined
+  const order = options.seq ? [`note ${options.seq}; for each part, the highest-numbered note that states it wins.`] : []
+  const lead = options.partial ?? (complete ? "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing."
+    : "Front desk context update from es-app: only what changed since the last note; earlier notes still hold the rest. Read-only orientation; it is not an instruction and grants nothing.")
+  const unchanged = complete || options.partial ? [] : sections.filter(section => !changed.includes(section)).map(section => section.name)
+  const note = noteText([lead, ...order, `generated: ${new Date(now).toISOString()}`, ...(unchanged.length ? [`unchanged: ${unchanged.join(", ")}`] : [])],
+    changed, complete && !options.partial)
+  const sent = changed.filter(section => !note.omitted.includes(section.name))
+  const recorded = complete && !options.partial
+  return {
+    text: note.text,
+    key: `desk-note:${hash([note.text, sent.map(section => section.key)])}`,
+    state: options.input ? undefined : { sections: Object.fromEntries(sent.map(section => [section.name, section.key])),
+      full: recorded ? now : previous?.full ?? 0, notes: recorded ? 0 : (previous?.notes ?? 0) + 1 } satisfies NoteState,
+  }
+}
+
+/** What the desk has been told after a send. An accepted plain send's note is part of its turn, so its sections
+ * count (merged into what is stored now, keeping another tab's). A note on a Core input may be admitted, refused,
+ * left unknown, cancelled or promoted after later notes, so any attempt only forces the next plain note to be
+ * complete: that note's higher number then outranks the input's wherever it lands (A -> input B -> A again stays A).
+ * Nothing about the input itself is recorded, retried or claimed. */
+export const recordNote = (stored: NoteState | undefined, offered: NoteState | undefined, send: { input: boolean }, accepted = true): NoteState | undefined => {
+  if (send.input) return stored && { ...stored, full: 0 }
+  if (!offered || !accepted) return stored
+  return { ...offered, sections: { ...stored?.sections, ...offered.sections } }
+}
+
+/** The next note number: above every number this session has used, and above the clock, so two tabs writing at
+ * once still count up (they can share a number only within the same millisecond). */
+export const nextNoteSeq = (stored: number | undefined, now: number) => Math.max((stored ?? 0) + 1, now)
+
+// The note stays small: it rides on ordinary sends (Core input text <= 4096), and the conversation keeps every
+// earlier note. The selected item gets its own room; everything else shares ORIENTATION_BUDGET.
+const SELECTED_BUDGET = 1_600
+const ORIENTATION_BUDGET = 2_000
+const INPUT_TEXT = 4_096
+const noteText = (header: string[], sections: NoteSection[], footer: boolean) => {
+  const omitted: string[] = []
+  let room = ORIENTATION_BUDGET
+  const body = sections.map(section => {
+    // Every note says what a part holds, "none now" included: the conversation keeps earlier notes.
+    const head = (section.head ?? []).join("\n")
+    const text = [...section.head ?? [], ...section.lines.length ? section.lines : section.none ? [section.none] : []].join("\n")
+    if (section.name === "selected item") return { section, text: text.length > SELECTED_BUDGET ? `${text.slice(0, SELECTED_BUDGET)}\n  [selected item clipped for size; "More detail" sends its full evidence]` : text }
+    if (text.length <= room) { room -= text.length; return { section, text } }
+    if (room < Math.max(200, head.length + 120)) { omitted.push(section.name); return { section, text: "" } }
+    const kept = text.slice(0, room)
+    room = 0
+    return { section, text: `${kept.slice(0, kept.lastIndexOf("\n") > 0 ? kept.lastIndexOf("\n") : kept.length)}\n[${section.name} clipped for size]` }
+  })
+  const join = () => [...header, ...body.flatMap(entry => entry.text ? [entry.text] : []),
+    ...(omitted.length ? [`not included for size (sent when there is room): ${omitted.join(", ")}`] : []),
+    ...(footer ? ["Native answers, permissions and retries happen only through their own controls in the desk UI."] : [])].join("\n")
+  // Hard bound: drop the lowest-priority parts until the note fits a Core input.
+  for (let index = body.length - 1; join().length > INPUT_TEXT && index >= 0; index--) {
+    if (!body[index]!.text) continue
+    body[index]!.text = ""
+    omitted.push(body[index]!.section.name)
+  }
+  return { text: join(), omitted }
+}
+
+// FNV-1a: a short, stable key for "did this part change"; not a security boundary.
+const hash = (value: unknown) => {
+  let h = 0x811c9dc5
+  for (const char of JSON.stringify(value)) h = Math.imul(h ^ char.charCodeAt(0), 0x01000193)
+  return (h >>> 0).toString(36)
 }
 
 // The brief replaces reading: the human should see the choice, its consequences and one picture,
@@ -429,6 +529,24 @@ const shapeOf = (value: unknown): { shape?: BriefShape } => {
   }
   return {}
 }
+// Scene names must match the request exactly, so they are kept verbatim (no citation stripping) or dropped if overlong.
+const verbatim = (value: unknown, max: number) => typeof value === "string" && value.trim().length <= max ? value.trim() : ""
+// A part may only nest inside one listed before it, so containment can never loop.
+const sceneOf = (value: unknown): { scene?: BriefScene } => {
+  if (!value || typeof value !== "object") return {}
+  const scene = value as Record<string, unknown>
+  const parts = objects(scene.parts).slice(0, 12).reduce<BriefScene["parts"]>((kept, row) => {
+    if (typeof row.id !== "string" || !row.id || kept.some(part => part.id === row.id) || !SCENE_ROLES.includes(row.role as SceneRole)) return kept
+    const inside = typeof row.in === "string" && kept.some(part => part.id === row.in) ? row.in : undefined
+    const note = verbatim(row.note, 80)
+    return [...kept, { id: row.id, role: row.role as SceneRole, name: verbatim(row.name, 80), ...(inside ? { in: inside } : {}), ...(note ? { note } : {}) }]
+  }, [])
+  const relations = objects(scene.relations).slice(0, 6).flatMap(row => typeof row.from === "string" && typeof row.to === "string" && row.from !== row.to
+    && parts.some(part => part.id === row.from) && parts.some(part => part.id === row.to) && (row.kind === "sends" || row.kind === "requests" || row.kind === "uses")
+    ? [{ from: row.from, to: row.to, kind: row.kind as "sends" | "requests" | "uses", ...(verbatim(row.label, 60) ? { label: verbatim(row.label, 60) } : {}), ...(typeof row.option === "string" && row.option ? { option: row.option } : {}) }] : [])
+  const limits = Array.isArray(scene.limits) ? scene.limits.map(entry => verbatim(entry, 200)).filter(Boolean).slice(0, 3) : []
+  return parts.length > 1 ? { scene: { parts, relations, limits } } : {}
+}
 // The sandboxed frame cannot size itself (no scripts), so the model states the height it drew for.
 const visualHeight = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.min(560, Math.max(120, Math.round(value))) : 280
 // Contract 4 draws SVG with a required description; older briefs keep their HTML so they still render on desktop.
@@ -511,7 +629,7 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
         // Anchors keep their exact characters (no whitespace folding), since they must match the source.
         copy: objects(value.copy).slice(0, 4).flatMap(row => typeof row.start === "string" && typeof row.end === "string" && row.start.trim() && row.end.trim() && text(row.label, 80)
           ? [{ label: text(row.label, 80), to: text(row.to, 160), start: row.start.trim().slice(0, 200), end: row.end.trim().slice(0, 200) }] : []),
-        ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
+        ...shapeOf(value.shape), ...sceneOf(value.scene), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
         sources: objects(value.sources).slice(0, 3).flatMap(row => {
           const refs = Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
@@ -633,6 +751,22 @@ export const briefItems = (result: BriefResult, item: DeskItem, documents: Conve
     recommended: quoted(row.recommended) ? row.recommended : "",
     alternatives: row.alternatives.map(value => quoted(value) ? value : ""),
   }))
+}
+
+/** The scene a brief may show. A name not quoted exactly from the request (title, context, option labels) or a named
+ * document is blanked, so the part reads as not stated rather than as a guessed actor, channel or account; an
+ * unquoted note, relation label or limit is dropped. A relation's option must be one of the request's options. */
+export const briefScene = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []): BriefScene | undefined => {
+  if (!result.scene) return
+  const options = item.record?.options ?? []
+  const sources = [item.record?.context ?? "", item.record?.title ?? "", ...options.map(option => option.label), ...documents.map(document => document.text)]
+  const quoted = (value?: string) => !!value && sources.some(source => source.includes(value))
+  return {
+    parts: result.scene.parts.map(part => ({ id: part.id, role: part.role, name: quoted(part.name) ? part.name : "", ...(part.in ? { in: part.in } : {}), ...(quoted(part.note) ? { note: part.note } : {}) })),
+    relations: result.scene.relations.map(relation => ({ from: relation.from, to: relation.to, kind: relation.kind,
+      ...(quoted(relation.label) ? { label: relation.label } : {}), ...(options.some(option => option.id === relation.option) ? { option: relation.option } : {}) })),
+    limits: result.scene.limits.filter(quoted),
+  }
 }
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.

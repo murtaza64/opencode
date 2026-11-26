@@ -86,7 +86,7 @@
   }
 }
 
-[data-slot="message-nav-item"]:has([data-slot="message-nav-title-preview"][data-active])
+[data-slot="message-nav-item"][data-preview-active]
   [data-slot="message-nav-message-button"] {
   background-color: var(--surface-base-active);
 }

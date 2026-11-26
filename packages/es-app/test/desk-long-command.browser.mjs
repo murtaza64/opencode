@@ -77,7 +77,7 @@ const measure = page => page.evaluate(() => {
   const wide = [document.documentElement, document.body, document.querySelector(".content"), document.querySelector(".desk"), document.querySelector(".desk-evidence")]
     .filter(el => el && el.scrollWidth > el.clientWidth + 1).map(el => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} ${el.scrollWidth}>${el.clientWidth}`)
   return { width: innerWidth, desk: rect(".desk"), queue: rect("nav.sidebar"), evidence: rect(".desk-evidence"), chat: rect(".desk-companion:not(.closed) .desk-chat"), question: rect(".home-question"),
-    pre: rect(".desk-command pre"), copy: rect(".desk-command-copy"), answer: rect(".home-answer textarea"), send: rect(".home-answer button.home-primary"), scrolled, wide }
+    pre: rect(".desk-command pre"), copy: rect(".desk-command-copy"), answer: rect(".home-answer textarea, .home-answer .home-add-note"), send: rect(".home-answer button.home-primary"), scrolled, wide }
 })
 const expectBounded = (name, box, { columns = true } = {}) => {
   assert.deepEqual(box.wide, [], `${name}: nothing in the desk scrolls sideways ${JSON.stringify(box)}`)
@@ -114,6 +114,8 @@ const check = async (name, viewport, extra = {}) => {
     await desk.page.waitForTimeout(200)
     if (shots) await desk.page.screenshot({ path: path.join(shots, `${name}-swiped.png`) })
     expectBounded(`${name} after a sideways swipe`, await measure(desk.page), { columns: viewport.width > 900 })
+    // A recommended choice starts selected with the note behind "Add a note".
+    if (await desk.card.locator(".home-add-note").count()) await desk.card.locator(".home-add-note").click()
     await desk.card.locator(".home-answer textarea").click()
     await expect(desk.card.locator(".home-answer textarea")).toBeFocused()
     assert.deepEqual(desk.errors, [])

@@ -14,6 +14,7 @@ import { oc } from "./api"
 import { clearBackend, reportBackend } from "./backend-status"
 import { unresolvedSend } from "./composer"
 import { background } from "./startup"
+import { shortDateTime } from "./local-time"
 
 export type RetryResult = Awaited<ReturnType<typeof oc.retrySession>> | { outcome: "blocked"; detail: string }
 export type RetryState =
@@ -51,7 +52,7 @@ export const failureAge = (time: number, now: number) => {
   return `${Math.floor(elapsed / OLD_FAILURE_MS)}d ago`
 }
 export const failureWhen = (time: number, now: number) =>
-  time > 0 ? `${new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} (${failureAge(time, now)})` : "time unavailable"
+  time > 0 ? `${shortDateTime(time)} (${failureAge(time, now)})` : "time unavailable"
 
 export const unavailableReason = (failure: Pick<SessionFailure, "retry">) =>
   failure.retry === "out-of-order" ? "the failed step is timestamped in the future" : "the failed step ran tools"

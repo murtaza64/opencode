@@ -51,7 +51,7 @@ const until = async (check, ms, label) => {
 }
 const log = { started: new Date().toISOString() }
 try {
-  const bar = await view((url) => url.startsWith("data:text/html"))
+  const bar = await view((url) => url.startsWith("data:text/html") && url.includes("%3Cnav"))
   const local = await view((url) => /^http:\/\/127\.0\.0\.1:\d+\/$/.test(url))
   const localOrigin = new URL(local.url()).origin
   await bar.getByRole("link", { name: "Mac Mini" }).click()

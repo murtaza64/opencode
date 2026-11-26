@@ -312,7 +312,7 @@ try {
   const sendIdle = async () => {
     await poll("desk idle", async () => !pointerID || (await status(pointerID)) === "idle")
     // The header may read busy while a brief child runs; the desk session itself must be idle.
-    await expect(page.locator(".desk-chat .session-state")).not.toHaveText(/disconnected|failed/, { timeout: 20000 })
+    await expect(page.locator(".desk-chat .session-state")).not.toHaveAttribute("aria-label", /disconnected|failed/, { timeout: 20000 })
     await expect(page.locator(".desk-chat").getByRole("button", { name: /^Send/ })).toBeEnabled({ timeout: 20000 })
     await editor().press("Control+Enter")
   }
@@ -769,7 +769,7 @@ try {
   await editor().fill("my unsent draft")
   const briefsBeforeDetail = hits.brief
   await card.getByRole("button", { name: "More detail" }).click()
-  await card.getByRole("textbox", { name: "Question for the front desk (optional)" }).fill("DESK-Q9 why the canary first?")
+  await card.getByRole("textbox", { name: "Question for Porter (optional)" }).fill("DESK-Q9 why the canary first?")
   await card.getByRole("button", { name: "Ask" }).click()
   await expect(card.locator(".desk-more")).toContainText("Asked in the chat.", { timeout: 20000 })
   await expect(transcript()).toContainText("More detail: Pick a rollout", { timeout: 20000 })

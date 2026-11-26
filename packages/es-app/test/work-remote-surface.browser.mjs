@@ -1,16 +1,23 @@
-// A Surface is seamless in the centre pane (Laptop2547/2578), this host's and another Work host's: one compact bar
-// (<= 32px) and the frame edge to edge (its left, right and bottom on the pane's edges) at wide, split (chat open) and
-// narrow windows and after a resize; the pane does not scroll; the frame owns scrolling of a tall artifact, by
-// keyboard too; Escape in the pane closes it. Disposable fixture. Run from packages/es-app: node test/work-remote-surface.browser.mjs
+// A Surface is seamless in the centre pane (Laptop2547/2578/2659), this host's and another Work host's. In the Mac app
+// (NATIVE=1, the default: an Electron/Mac user agent, so the app top bar is the window's title bar) its title and
+// actions sit in that one top bar and the frame touches all four pane edges; in a plain browser (NATIVE=0) the same row
+// is the pane's inline header and the frame touches left, right and bottom. At wide, split (chat docked) and narrow
+// windows and after a resize; the pane does not scroll; the frame owns scrolling of a tall artifact, by keyboard too;
+// Escape closes it from the pane or the top bar; with chat docked, the top bar closes the Surface, not the chat. Disposable fixture. Run from packages/es-app: node test/work-remote-surface.browser.mjs
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
+import { directory } from "./composer-fixture.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startAttentionPreview()
 const browser = await chromium.launch({ headless: true,
   ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+const native = process.env.NATIVE !== "0"
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 },
+  ...(native ? { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Electron/42.3.3 Chrome/142.0.0.0 Safari/537.36" } : {}) })
 page.setDefaultTimeout(60_000)
+// The docked chat is the Front desk on an existing fixture session, so it has a composer to hold a draft.
+await page.addInitScript((value) => { if (window === window.top) localStorage.setItem("es-app:front-desk:1", JSON.stringify(value)) }, { session: "ses_a", directory })
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
 const miniOrigin = "http://127.0.0.1:65032"
@@ -37,21 +44,25 @@ await page.route("**/hosts/mini/**", route => {
   return route.fulfill({ json: [] })
 })
 const detail = page.locator(".work-remote")
-// The centre pane is the desk grid; the frame should sit on its left, right and bottom edges under one bar.
+// The centre pane is the desk grid; the frame sits on its edges, below the top bar (native) or the inline header.
 const measure = (selector) => page.locator(selector).evaluate((section) => {
   const box = (element) => element.getBoundingClientRect()
   const pane = box(section.closest(".desk-grid"))
   const frame = box(section.querySelector("iframe.desk-surface-frame"))
-  const bar = section.querySelector(".surface-bar")
-  return { left: Math.round(frame.left - pane.left), right: Math.round(pane.right - frame.right), bottom: Math.round(pane.bottom - frame.bottom),
-    bar: bar ? Math.round(box(bar).height) : null, heads: section.querySelectorAll(".desk-evidence-head").length, frame: Math.round(frame.height), paneScrolls: section.scrollHeight > section.clientHeight + 1 }
+  const head = document.querySelector(".surface-head")
+  return { top: Math.round(frame.top - pane.top), left: Math.round(frame.left - pane.left), right: Math.round(pane.right - frame.right), bottom: Math.round(pane.bottom - frame.bottom),
+    headInTopBar: !!head?.closest(".native-header"), headHeight: head ? Math.round(box(head).height) : null, oldBar: document.querySelectorAll(".surface-bar").length,
+    heads: section.querySelectorAll(".desk-evidence-head").length, frame: Math.round(frame.height), paneScrolls: section.scrollHeight > section.clientHeight + 1 }
 })
 const seamless = (name, value) => {
-  for (const edge of ["left", "right", "bottom"]) expect(Math.abs(value[edge]), `${name}: frame ${edge} inset ${value[edge]}px`).toBeLessThanOrEqual(1)
-  expect(value.bar, `${name}: bar height`).toBeLessThanOrEqual(32)
+  for (const edge of native ? ["top", "left", "right", "bottom"] : ["left", "right", "bottom"]) expect(Math.abs(value[edge]), `${name}: frame ${edge} inset ${value[edge]}px`).toBeLessThanOrEqual(1)
+  expect(value.headInTopBar, `${name}: title and actions in the app top bar`).toBe(native)
+  expect(value.headHeight, `${name}: head height`).toBeLessThanOrEqual(native ? 44 : 48)
+  expect(value.oldBar, `${name}: second Surface bar`).toBe(0)
   expect(value.heads, `${name}: stacked header`).toBe(0)
   expect(value.paneScrolls, `${name}: the pane scrolls`).toBe(false)
 }
+const head = () => page.locator(".surface-head")
 const results = {}
 try {
   await page.goto(`${preview.url}/agents`, { waitUntil: "domcontentloaded", timeout: 300_000 })
@@ -65,10 +76,11 @@ try {
   results.local = await measure(".desk-evidence.desk-surface")
   console.log("local", JSON.stringify(results.local))
   seamless("local", results.local)
-  // Escape in the pane (focus on the bar, outside the frame) closes it.
-  await localPane.getByRole("button", { name: "Close and return to chat" }).focus()
+  // Escape from the top bar's own button (outside the section when native) closes it.
+  await head().getByRole("button", { name: "Close and return to chat" }).focus()
   await page.keyboard.press("Escape")
   await expect(localPane).toHaveCount(0)
+  await expect(head()).toHaveCount(0)
   const row = page.locator("nav.sidebar [data-nav-item='mini~surface:srf_spec']")
   await expect(row).toBeVisible({ timeout: 120_000 })
   await row.click()
@@ -86,11 +98,39 @@ try {
     seamless(name, value)
     if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}-${name.split(" ")[0]}.png` })
   }
-  if (await chat.getAttribute("aria-pressed") === "true") await chat.click()
-  // The frame scrolls the tall artifact, by keyboard as well.
+  // Chat docked beside the Surface: the top bar's close targets the Surface; the chat and its draft stay.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const openChat = page.locator(".desk-companion:not(.closed)")
+  await page.waitForTimeout(300)
+  if (!(await openChat.count())) await chat.click()
+  await expect(openChat).toHaveCount(1)
+  // A draft typed in the chat survives closing the Surface with the top-bar Close and with Escape.
+  const draft = page.locator(".desk-chat textarea").first()
+  await expect(draft).toBeVisible()
+  await draft.fill("chat draft kept")
+  await expect(head().getByRole("button", { name: "Close" })).toBeVisible()
+  await expect(head()).toContainText("Mac Mini")
+  await head().getByRole("button", { name: "Close" }).click()
+  await expect(detail).toHaveCount(0)
+  await expect(openChat).toHaveCount(1)
+  await expect(draft).toHaveValue("chat draft kept")
+  await row.click()
+  await expect(detail.locator("iframe.desk-surface-frame")).toBeVisible()
+  await head().getByRole("button", { name: "Close" }).focus()
+  await page.keyboard.press("Escape")
+  await expect(detail).toHaveCount(0)
+  await expect(openChat).toHaveCount(1)
+  await expect(draft).toHaveValue("chat draft kept")
+  results.splitClose = { chatOpen: true, draftKept: await draft.inputValue() }
+  await chat.click()
+  await expect(openChat).toHaveCount(0)
+  await row.click()
+  await expect(detail.locator("iframe.desk-surface-frame")).toBeVisible()
+  await expect(frame.locator("nav")).toHaveText("Spec nav")
+  // The frame scrolls the tall artifact, by keyboard as well (the reopened frame: the last one with that address).
   await frame.locator("p").first().click()
   await page.keyboard.press("PageDown")
-  const artifact = page.frames().find((item) => item.url().includes("/__es/frame/srf_spec"))
+  const artifact = page.frames().filter((item) => item.url().includes("/__es/frame/srf_spec") && !item.isDetached()).at(-1)
   // Keyboard scrolling may animate: wait for it to move.
   await expect.poll(() => artifact.evaluate(() => scrollY)).toBeGreaterThan(0)
   const scrolled = await artifact.evaluate(() => ({ y: scrollY, height: document.documentElement.scrollHeight, view: innerHeight }))
@@ -103,15 +143,15 @@ try {
   results.narrow = await measure(".work-remote")
   console.log("narrow", JSON.stringify(results.narrow))
   for (const edge of ["left", "right"]) expect(Math.abs(results.narrow[edge]), `narrow: frame ${edge} inset`).toBeLessThanOrEqual(1)
-  expect(results.narrow.bar).toBeLessThanOrEqual(32)
+  expect(results.narrow.oldBar).toBe(0)
   expect(results.narrow.frame).toBeGreaterThanOrEqual(Math.round(900 * 0.7) - 2)
   // Escape closes another host's Surface too.
-  await detail.getByRole("button", { name: "Close" }).focus()
+  await head().getByRole("button", { name: "Close" }).focus()
   await page.keyboard.press("Escape")
   await expect(detail).toHaveCount(0)
   expect(errors).toEqual([])
   console.log(JSON.stringify(results))
-  console.log("PASS seamless surface: local and remote frame 0px inset (left/right/bottom), one bar <= 32px, no stacked header, wide/split/resized/narrow; frame scrolls by keyboard; Escape closes")
+  console.log(`PASS seamless surface (${native ? "native top bar" : "browser inline header"}): local and remote title/actions in ${native ? "the app top bar, frame 0px on all four edges" : "the inline header, frame 0px left/right/bottom"}; no second bar; wide/split/resized/narrow; frame scrolls by keyboard; Escape closes from the top bar; with chat docked, top-bar Close and Escape close the Surface and keep the chat and its draft`)
 } finally {
   await browser.close()
   await preview.close()

@@ -56,6 +56,7 @@
 :root .pending-bubble { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); color: var(--subtext1); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-style: solid !important; }
 :root .pending-msg[data-status="pending"] .pending-bubble { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 :root .pending-msg[data-status="unknown"] .pending-bubble { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); }
+:root .outgoing-msg:is([data-status="sending"], [data-status="accepted"]) .pending-bubble { background: color-mix(in srgb, var(--accent) 10%, var(--mantle)); color: var(--text); border-color: transparent; box-shadow: var(--shadow-raised); }
 
 /* Composer: one raised field instead of a bordered box inside a bordered strip. */
 :root .prompt-box { border-top: 0; background: transparent; }
@@ -70,7 +71,7 @@
 :root .direct-primary { border-radius: var(--radius-control) !important; background: var(--accent); color: var(--crust); border-color: var(--accent); font-weight: 600; }
 :root .direct-primary:disabled { background: transparent; }
 :root .direct-more { border-start-end-radius: var(--radius-control) !important; border-end-end-radius: var(--radius-control) !important; }
-:root .direct-split:has(.direct-more:not(.idle)) .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
+:root .direct-split[data-busy] .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
 /* Shortcut hint: same font and baseline as the label, sized to read (the global kbd rule forces mono). */
 :root .shell .direct-button-hint { font: 500 12px/1 var(--font-sans) !important; letter-spacing: .02em; align-self: center; }
 :root .direct-primary { gap: 12px; }
@@ -80,26 +81,40 @@
 :root .desk-item:hover { background: var(--hover); }
 :root .desk-item[aria-pressed=true] { background: var(--selected); border-inline-start-color: var(--accent); }
 
-/* Wallpaper backdrop: one fixed, pre-blurred image under the session page, dimmed with a
- * scrim so text contrast holds. Painted once; no backdrop-filter on content. */
-/* The backdrop spans the whole session page, padding and gaps included, so it meets the nav and the
- * info panel (opaque) with no solid gutters. */
+/* Wallpaper backdrop: one pre-blurred image for the whole window, behind the content and the Front desk
+ * companion split, so two chat panes meet on the same pixels. Panes keep only their own scrim; the image never
+ * scrolls and never re-crops when the split opens or the sidebar toggles. No backdrop-filter on content. */
+:root[data-appearance=wallpaper] .shell { position: relative; isolation: isolate; }
+:root[data-appearance=wallpaper] .wallpaper-backdrop { display: none; }
+:root[data-appearance=wallpaper] .shell[data-session-page] > .wallpaper-backdrop {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* Tint and Dim apply once to the shared wallpaper, beneath both pane scrims. */
+    linear-gradient(color-mix(in srgb, var(--mantle) calc(var(--wallpaper-tint, 0) * 100%), transparent), color-mix(in srgb, var(--mantle) calc(var(--wallpaper-tint, 0) * 100%), transparent)),
+    /* WalStudio's Dim darkens the wallpaper itself, under the pane scrims. */
+    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))),
+    var(--wallpaper, none) center / cover no-repeat;
+}
 :root[data-appearance=wallpaper] .session-page { position: relative; isolation: isolate; }
 :root[data-appearance=wallpaper] .session-page::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
-  background:
-    linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent)),
-    /* WalStudio's Tint washes the wallpaper toward the palette background, over its Dim and under the scrim
-       (Studio's preview stacks the same way: image, dim, tint, scrim). */
-    linear-gradient(color-mix(in srgb, var(--mantle) calc(var(--wallpaper-tint, 0) * 100%), transparent), color-mix(in srgb, var(--mantle) calc(var(--wallpaper-tint, 0) * 100%), transparent)),
-    /* WalStudio's Dim darkens the wallpaper itself. */
-    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))),
-    var(--wallpaper, none) center / cover no-repeat;
+  background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent));
   pointer-events: none;
 }
+/* In a session split the companion shares the window image: transparent panel, scrim only, hairline divider.
+ * (On a desk page there is no main session; the companion's own backdrop stays as desk-followups.css draws it.) */
+:root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion { background: transparent; }
+:root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion-in::before {
+  background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent));
+}
+:root[data-appearance=wallpaper] .desk-companion-in { border-inline-start-color: color-mix(in srgb, var(--text) 18%, transparent); }
 :root[data-appearance=wallpaper] .sidebar { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); }
 :root[data-appearance=wallpaper] .session-page,
 :root[data-appearance=wallpaper] .session-page .topbar,
@@ -110,7 +125,10 @@
 :root[data-appearance=wallpaper] .transcript [data-component="tool-part-wrapper"] { background: color-mix(in srgb, var(--mantle) 88%, transparent); }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-appearance=wallpaper] .session-page::before { background: var(--base); }
+  /* The one image becomes the solid base, as each pane used to; no scrim over it. */
+  :root[data-appearance=wallpaper] .shell[data-session-page] > .wallpaper-backdrop { background: var(--base); }
+  :root[data-appearance=wallpaper] .session-page::before,
+  :root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion-in::before { background: none; }
 }
 
 /* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
@@ -177,7 +195,7 @@
 @media (prefers-reduced-motion: reduce) { .info-meter-fill { transition: none; } }
 /* Selected session: the band runs the full sidebar width (row plus its pin button). */
 :root .session-entry { margin-inline: 0; }
-:root .session-entry:has(> .nav-item.active) { background: var(--selected); }
+:root .session-entry[data-active] { background: var(--selected); }
 :root .session-entry > .nav-item.active { background: transparent; }
 
 /* Sidebar todos: borderless; the current item carries the weight, pending is plain, done is quiet. */
@@ -194,6 +212,7 @@
 :root .nav-entries { display: grid; padding-block: 4px 6px; border-block-end: 1px solid var(--surface1); margin-block-end: 6px; }
 :root .nav-entry { position: relative; width: 100%; font: inherit; font-size: 13px; text-align: start; background: transparent; border: 0; cursor: pointer; }
 :root .nav-entry .glyph { color: var(--subtext0); margin-inline-end: 2px; }
+:root .nav-entry .nav-avatar { inline-size: 16px; block-size: 16px; border-radius: 50%; object-fit: cover; margin-inline-end: 2px; flex: none; }
 :root .nav-entry.active, :root .nav-entry[aria-pressed=true] { color: var(--text); }
 :root .nav-entry.active { background: var(--selected); }
 :root .nav-entry[aria-pressed=true] .glyph { color: var(--accent); }
@@ -205,6 +224,8 @@
 :root .nav-entries.compact .nav-busy { position: absolute; inset-block-end: 4px; inset-inline-end: 8px; }
 .desk-companion { --companion-width: clamp(320px, 26vw, 380px); flex: none; position: relative; box-sizing: border-box; inline-size: var(--companion-width); block-size: 100%; min-height: 0; overflow: hidden; background: var(--base); }
 .desk-companion-in { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: var(--companion-width); box-sizing: border-box; border-inline-start: 1px solid var(--surface1); display: flex; flex-direction: column; }
+/* The companion fills its panel; the Decisions page's narrow-window chat height (desk.css .desk-chat 85vh) is not its. */
+.desk-companion .desk-companion-in { block-size: auto; }
 .desk-companion-in > .session-page { flex: 1; min-height: 0; height: auto; padding: 0; --chat-gutter: 14px; }
 /* Closed: zero width but still laid out at its own width inside, so text never rewraps and scroll holds. */
 .desk-companion.closed { inline-size: 0; visibility: hidden; }
@@ -229,7 +250,10 @@
 :root .nav-entries { position: relative; }
 :root .nav-entries > .backend-status { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; }
 :root .nav-entries > .host-badge, :root .nav-entries > .host-switch { justify-self: start; margin-inline-start: 14px; }
+/* The status slot sits over the last entry's trailing edge (Front desk), so that entry keeps its own busy dot clear of
+ * it; the slot takes pointer events only while it shows a status button. */
 :root .nav-entries > .backend-status ~ .nav-entry { padding-inline-end: 28px; }
+:root .nav-entries > .backend-status[data-state=ok] { pointer-events: none; }
 /* Composer footer meta (ux-feel contract) */
 /* [model] [ctx] [cost] [Send]: the meta group shrinks and ellipsizes before Send moves. */
 .composer-meta { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-inline-size: 0; }
@@ -291,6 +315,21 @@
   .tool-run-icon[data-size="XL"] { --tool-icon: 20px; }
   .tool-run-icon [data-component="icon"], .tool-run-icon svg { inline-size: var(--tool-icon); block-size: var(--tool-icon); color: inherit; }
   .tool-run-icon[data-status="unfinished"] { color: var(--accent, var(--blue)); }
+  /* One reasoning chip per part, in the same quiet row as a tool: brain, label, disclosure. Collapsed while streaming
+   * and after; the live dot is the chip's own state (the composer keeps only the session activity dot). */
+  .reasoning-chip { display: inline-block; max-inline-size: 100%; margin-block: 2px; }
+  .reasoning-chip[data-open] { display: block; }
+  .reasoning-chip-summary { gap: 6px; }
+  .reasoning-chip-label { color: var(--subtext0); font: 400 13px/20px var(--font-sans); }
+  .reasoning-chip[data-streaming] .reasoning-chip-label { color: var(--subtext1); }
+  .reasoning-chip-live { display: inline-flex; align-items: center; }
+  .reasoning-chip-live i { inline-size: 5px; block-size: 5px; border-radius: 50%; background: var(--accent, var(--blue)); animation: reasoning-pulse 1s ease-in-out infinite; }
+  .reasoning-chip-disclosure { color: var(--overlay1); font-size: 15px; line-height: 1; transition: transform .12s ease-out; }
+  .reasoning-chip-disclosure[data-open] { transform: rotate(90deg); }
+  .reasoning-chip-member { margin: 2px 0 4px; padding-inline-start: 26px; color: var(--subtext0); }
+  .reasoning-chip-member [data-component="markdown"] { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--subtext0); }
+  @keyframes reasoning-pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .reasoning-chip-live i { animation: none; } .reasoning-chip-disclosure { transition: none; } }
   .tool-run-icon[data-status="failed"] { color: var(--red); }
   .tool-run-icon:is([data-status="interrupted"], [data-status="unknown-exit"], [data-status="unknown"]) { color: var(--overlay1); }
   .tool-run-more { align-self: center; padding-inline: 2px; font-size: 12px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
@@ -417,10 +456,18 @@
 .desk-companion [data-slot=text-part-meta] { display: none; }
 
 /* Review items (ATTN-15): "Try" tag in Needs you; the artifact link leads the review view. */
-.nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
-.review-artifact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; }
-.review-link { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
-.review-link svg { flex: none; }
+.nav-decision[data-kind=try-decision] .nav-kind, .nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+/* A Surface with a decision waiting on it: the decision count reads as the row's action. */
+.nav-linked-decision { color: var(--peach); font-weight: 600; }
+/* The title row: the request title, then the artifact to open as the primary button (wraps under it when narrow). */
+.home-decision-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.home-decision-title > h3 { flex: 1 1 16em; min-inline-size: 0; }
+.home-decision-title a.artifact-open, .home-decision-title a.artifact-open:visited { display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 28px; padding: 3px 10px; border: 1px solid var(--peach); border-radius: 6px; color: var(--crust); background: var(--peach); font-size: 12px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.home-decision-title a.artifact-open:hover { background: color-mix(in srgb, var(--peach) 85%, var(--text)); }
+.artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.artifact-open-rev { font-weight: 400; white-space: nowrap; }
+.artifact-open svg { flex: none; }
+.artifact-unavailable { font-size: 12px; }
 
 /* NAV-16/17: Agents filter row and tab feel. Selection is immediate (aria-selected); only the underline eases. */
 .agent-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 6px; }
@@ -476,7 +523,7 @@
 /* STYLE-12 session top bar, the same in the window and the native title bar (where the bar is portaled outside
  * .session-page, which left the host glyph stacked over a wrapping label): the title leads and truncates first,
  * the host glyph and label stay on one baseline and truncate second, the state stays readable and secondary. */
-.topbar:has(> .session-title) { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.topbar[data-session-title] { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
 .topbar > .session-title { flex: 0 1 auto; min-inline-size: 6ch; }
 .topbar > .session-host { display: inline-flex; align-items: center; gap: 4px; flex: 0 0.0001 auto; min-inline-size: 14px; overflow: hidden; font-size: 12px; line-height: 1; color: var(--subtext0); white-space: nowrap; }
 .topbar > .session-host .host-glyph { flex: none; display: block; inline-size: 12px; block-size: 12px; margin: 0; }
@@ -487,16 +534,18 @@
 
 /* The narrow-window chat floats over the inline-end edge (380px); the open item's bar keeps its actions out from
  * under it, so Open and Close stay reachable without closing the chat. */
-body:has(.desk-companion.overlay:not(.closed)) :is(.surface-bar, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
+body[data-companion-overlay] :is(.surface-head, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
 
 /* ATTN-02: a decision's header is one line: requester (truncates first) · age · agent thread at the end. Who updated
  * it or where answers go now, shown only when they differ, takes its own line below. */
-.home-decision .home-eyebrow { display: grid; grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: baseline; }
+.home-decision .home-eyebrow { display: grid; grid-template-columns: minmax(0, auto) auto auto minmax(0, 1fr) auto auto; column-gap: 12px; row-gap: 2px; align-items: baseline; }
 .home-decision .home-eyebrow > .attention-requester { grid-area: 1 / 1; min-inline-size: 0; overflow: hidden; }
 .home-decision .home-eyebrow > .attention-requester .attention-agent { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-decision .home-eyebrow > .attention-project { white-space: nowrap; }
-.home-decision .home-eyebrow > time { grid-area: 1 / 2; white-space: nowrap; }
-.home-decision .home-eyebrow > a { grid-area: 1 / 4; margin: 0; white-space: nowrap; }
+.home-decision .home-eyebrow > .decision-host { grid-area: 1 / 2; align-self: center; }
+.home-decision .home-eyebrow > .decision-state { grid-area: 1 / 5; align-self: center; margin: 0; }
+.home-decision .home-eyebrow > time { grid-area: 1 / 3; white-space: nowrap; }
+.home-decision .home-eyebrow > a { grid-area: 1 / 6; margin: 0; white-space: nowrap; }
 .home-decision .home-eyebrow > .attention-routing { grid-area: 2 / 1 / 3 / -1; }
 
 /* ATTN-11 decision actions: the one primary action starts the row; Snooze / No longer needed sit apart at its end as
@@ -506,3 +555,259 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-bar, .desk-evidence-
 .home-decision .home-answer .home-actions > .home-quiet { order: 1; }
 .home-decision .home-answer .home-actions > .home-quiet:first-of-type, .home-decision .home-answer .home-actions > .home-primary + .home-quiet { margin-inline-start: auto; }
 .home-decision .home-answer .home-actions > .home-muted { order: 2; flex-basis: 100%; margin-inline-start: 0; font-size: 11px; }
+/* Agents tab toolbar (Laptop2677): New, Search, one Filter control in one row; everything else in the Filter popover. */
+.agent-toolbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; }
+.agent-toolbar > .search-input { flex: 1; min-inline-size: 0; margin: 0; }
+.agent-toolbar .agent-new { flex: none; }
+.sidebar-filter { position: relative; flex: none; }
+.sidebar-filter > summary { list-style: none; min-inline-size: 24px; justify-content: center; }
+.sidebar-filter > summary::-webkit-details-marker { display: none; }
+.sidebar-filter[open] > summary { color: var(--text); background: var(--surface0); }
+.sidebar-filter-count { min-inline-size: 14px; padding: 0 4px; border-radius: 7px; font-size: 10px; line-height: 14px; text-align: center; color: var(--crust); background: var(--accent); font-variant-numeric: tabular-nums; }
+/* The popover: one raised panel, groups separated by space and a hairline; type follows the design-system roles
+ * (meta 11px labels, body 12-13px options). Multi-choice lists keep checkboxes; single-choice groups are segmented
+ * (Show, Sort) or a check-marked list (Project). Selection and focus use the accent role, never colour alone. */
+.sidebar-filter-panel { position: absolute; inset-block-start: calc(100% + 6px); inset-inline-end: -2px; z-index: 20; display: grid; inline-size: min(232px, calc(100vw - 16px)); max-block-size: 64vh; overflow: auto;
+  padding: 4px 0; background: var(--ds-raised, var(--mantle)); border: 1px solid var(--ds-line, var(--surface1)); border-radius: 8px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / .32), 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent) inset; font-size: 12px; color: var(--ds-text, var(--text)); }
+.sidebar-filter-panel fieldset { display: grid; gap: 1px; margin: 0; padding: 8px 10px; border: 0; min-inline-size: 0; }
+.sidebar-filter-panel fieldset + fieldset { border-block-start: 1px solid var(--ds-line, var(--surface0)); }
+.sidebar-filter-panel legend { float: inline-start; inline-size: 100%; padding: 0 2px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ds-muted, var(--subtext0)); }
+/* Lists: full-width rows, 26px, a soft hover, the chosen row in the text colour with a check at the end. */
+.sidebar-filter-list label { display: flex; align-items: center; gap: 8px; min-block-size: 26px; padding: 0 6px; border-radius: 5px; color: var(--ds-text, var(--text)); cursor: pointer; }
+.sidebar-filter-list label:hover { background: color-mix(in srgb, var(--ds-text, var(--text)) 6%, transparent); }
+.sidebar-filter-list label[data-focus-visible] { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: -2px; }
+.sidebar-filter-list label bdi, .sidebar-filter-list label > span:not(.sidebar-filter-n) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-filter-list input[type=checkbox] { flex: none; inline-size: 14px; block-size: 14px; margin: 0; accent-color: var(--ds-accent, var(--accent)); }
+.sidebar-filter-list[data-single] label { position: relative; }
+.sidebar-filter-list[data-single] input, .sidebar-filter-segments input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.sidebar-filter-list[data-single] label[data-checked] { font-weight: 600; }
+.sidebar-filter-list[data-single] label[data-checked]::after { content: "✓"; margin-inline-start: auto; color: var(--ds-accent, var(--accent)); font-weight: 600; }
+.sidebar-filter-panel .host-glyph { flex: none; margin: 0; color: var(--ds-muted, var(--subtext0)); }
+.sidebar-filter-n { margin-inline-start: auto; min-inline-size: 18px; padding: 0 5px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: var(--ds-muted, var(--subtext0));
+  background: color-mix(in srgb, var(--ds-text, var(--text)) 6%, transparent); font-variant-numeric: tabular-nums; }
+.sidebar-filter-n:empty { display: none; }
+/* Segments: one track, equal cells, the chosen cell raised. */
+.sidebar-filter-panel .sidebar-filter-segments { display: flex; flex-wrap: wrap; gap: 1px; }
+.sidebar-filter-segments > label { flex: 1 1 0; min-inline-size: 0; }
+.sidebar-filter-segments > label { position: relative; display: grid; place-items: center; min-block-size: 26px; padding: 0 6px; font-size: 12px; color: var(--ds-muted, var(--subtext0)); cursor: pointer;
+  background: color-mix(in srgb, var(--ds-text, var(--text)) 5%, transparent); }
+.sidebar-filter-segments > label:first-of-type { border-start-start-radius: 6px; border-end-start-radius: 6px; }
+.sidebar-filter-segments > label:last-of-type { border-start-end-radius: 6px; border-end-end-radius: 6px; }
+.sidebar-filter-segments > label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-filter-segments > label:hover { color: var(--ds-text, var(--text)); }
+.sidebar-filter-segments > label[data-checked] { color: var(--ds-text, var(--text)); font-weight: 600; background: color-mix(in srgb, var(--ds-accent, var(--accent)) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ds-accent, var(--accent)) 55%, transparent); }
+.sidebar-filter-segments > label[data-focus-visible] { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: 1px; z-index: 1; }
+.sidebar-filter-segments legend { flex: 0 0 100%; }
+/* Footer: Clear is a quiet text action, Done the one filled button. */
+.sidebar-filter-actions { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px; border-block-start: 1px solid var(--ds-line, var(--surface0)); }
+.sidebar-filter-actions button { min-block-size: 24px; padding: 0 10px; font: inherit; font-size: 12px; border-radius: 5px; cursor: pointer; }
+.sidebar-filter-actions button:first-child { padding-inline: 2px; color: var(--ds-muted, var(--subtext0)); background: none; border: 0; }
+.sidebar-filter-actions button:first-child:not(:disabled):hover { color: var(--ds-text, var(--text)); text-decoration: underline; }
+.sidebar-filter-actions button:disabled { opacity: .45; cursor: default; }
+.sidebar-filter-actions .sidebar-filter-done { color: var(--crust); background: var(--ds-accent, var(--accent)); border: 0; font-weight: 600; }
+.sidebar-filter-actions button:focus-visible { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: 2px; }
+.filtered-out { padding: 4px 14px; font-size: 11px; color: var(--subtext0); }
+.filtered-out button { padding: 0; border: 0; background: none; font: inherit; font-size: 11px; color: var(--accent); cursor: pointer; }
+.filtered-out button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Browse tabs as pills (sidebar-decision-history-tabs): the selected tab is a filled pill with heavier text, so it reads at
+ * a glance without an underline. Tabs take their natural width (labels never truncate at 240px); counts stay plain
+ * tabular digits, except Decisions, whose count is a badge while something needs you. No motion. */
+.nav-tabs { gap: 0; padding: 6px 6px; border-block-end: 0; margin-block-end: 2px; }
+.nav-tabs [role=tab] { flex: 1 1 auto; align-items: center; gap: 3px; padding: 4px 3px; border: 0 !important; border-radius: 6px; transition: none; }
+.nav-tabs [role=tab]::after { display: none; }
+.nav-tabs [role=tab]:hover:not([aria-selected=true]) { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.nav-tabs [role=tab][aria-selected=true] { color: var(--text); font-weight: 600; background: var(--surface0); }
+.nav-tabs [role=tab]:active { transform: none; }
+.nav-tabs [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-tab-count:empty { display: none; }
+/* A shown count reserves three tabular characters ("12+"), so "N" becoming "N+" or a digit changing never shifts the row. */
+.nav-tab-count { box-sizing: content-box; min-inline-size: 3ch; font-size: 10px; font-weight: 400; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+#nav-tab-decisions .nav-tab-count:not(:empty) { padding: 0 4px; text-align: center; border-radius: 7px; line-height: 14px; color: var(--crust); background: var(--peach); font-weight: 600; }
+/* Decisions: Open | History, one segmented control. */
+.decision-views { display: flex; gap: 1px; margin: 2px 10px 4px; padding: 2px; border-radius: 6px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.decision-view { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-block-size: 22px; padding: 0 8px; font: inherit; font-size: 12px; color: var(--subtext0); background: none; border: 0; border-radius: 4px; cursor: pointer; }
+.decision-view[aria-checked=true] { color: var(--text); font-weight: 600; background: var(--surface0); }
+.decision-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.decision-view-count { font-size: 10px; font-weight: 400; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+/* History rows: title on the first line, outcome first on the second (scanned by outcome), then who and when. */
+.nav-history { list-style: none; margin: 0; padding: 0; }
+.nav-history-row { display: grid !important; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; align-items: baseline; }
+.nav-history-row > .nav-kind { grid-row: 1 / span 2; color: var(--subtext0); text-align: center; }
+.nav-history-row > .nav-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
+.nav-history-meta { grid-column: 2; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.nav-history-status { color: var(--text); }
+.nav-history-row:is([data-status=decided], [data-status=blocked]) :is(.nav-kind, .nav-history-status) { color: var(--peach); }
+.nav-history-row[data-status=answered] .nav-kind, .nav-history-row[data-status=resolved] .nav-kind { color: var(--green); }
+.nav-history-row:is([data-status=once], [data-status=always], [data-status=replied]) .nav-kind { color: var(--green); }
+.nav-history-row:is([data-status=reject], [data-status=rejected]) :is(.nav-kind, .nav-history-status) { color: var(--peach); }
+.nav-history-row[data-status=vanished] .nav-history-status { color: var(--subtext0); }
+/* Meeting-brief routing rows (DD #517): one line each, toggle or "with Send", who -> whom, the summary. */
+.routing-source { margin: 0 0 6px; }
+.routing-items { list-style: none; margin: 8px 0 4px; padding: 0; display: grid; gap: 2px; }
+.routing-item { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px; padding: 5px 8px; border-radius: 6px; font-size: 12px; }
+.routing-item[data-on] { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.routing-item:not([data-on]) .routing-effect { color: var(--subtext0); }
+.routing-auto { font-size: 10px; padding: 1px 6px; border-radius: 8px; color: var(--teal); border: 1px solid color-mix(in srgb, var(--teal) 45%, transparent); white-space: nowrap; }
+.routing-toggle { appearance: none; inline-size: 28px; block-size: 16px; margin: 0; border-radius: 8px; background: var(--surface1); position: relative; cursor: pointer; }
+.routing-toggle::after { content: ""; position: absolute; inset-block-start: 2px; inset-inline-start: 2px; inline-size: 12px; block-size: 12px; border-radius: 50%; background: var(--subtext0); }
+.routing-toggle:checked { background: var(--peach); }
+.routing-toggle:checked::after { inset-inline-start: 14px; background: var(--crust); }
+.routing-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.routing-toggle:disabled { opacity: .5; cursor: default; }
+.routing-flow { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--subtext1); }
+.routing-actor { display: inline-flex; align-items: center; gap: 3px; }
+.routing-actor[data-kind=owner] { font-weight: 600; color: var(--text); }
+.routing-arrow { color: var(--overlay1); }
+.routing-effect { min-inline-size: 0; overflow-wrap: anywhere; color: var(--text); }
+.routing-tags { display: inline-flex; gap: 4px; }
+.routing-rec, .routing-risk { font-size: 10px; padding: 0 5px; border-radius: 4px; }
+.routing-rec { color: var(--peach); background: color-mix(in srgb, var(--peach) 14%, transparent); }
+.routing-risk { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+@media (max-width: 520px) { .routing-item { grid-template-columns: auto minmax(0, 1fr); } .routing-flow, .routing-effect { grid-column: 2; } .routing-tags { grid-column: 2; } }
+
+/* Unified sidebar (Loupe BUILD, approved ~21:13Z): one list. Needs you opens it; Recent blends
+ * agents, Surfaces and closed decisions. Chips narrow by kind; PRs have no row, chip or count. */
+.unified-sidebar { display: flex; flex-direction: column; min-block-size: 0; }
+.unified-toolbar { display: flex; align-items: center; gap: 2px; padding-inline-end: 8px; }
+.unified-toolbar > .agent-toolbar { flex: 1; min-inline-size: 0; }
+.density-toggle { flex: none; inline-size: 26px; block-size: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--surface1); border-radius: var(--radius-control); background: var(--base); color: var(--subtext0); font-size: 12px; cursor: pointer; }
+.density-toggle[aria-pressed=true] { color: var(--text); background: var(--surface0); }
+.density-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.unified-sidebar .nav-tabs { display: flex; flex-wrap: nowrap; gap: 3px; padding: 2px 8px 8px; border-block-end: 0; margin-block-end: 0; overflow-x: auto; scrollbar-width: none; }
+.unified-sidebar .nav-tabs::-webkit-scrollbar { display: none; }
+.unified-sidebar .nav-tabs [role=tab] { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--surface1); border-radius: 999px; font-size: 10.5px; color: var(--subtext0); background: transparent; }
+.unified-sidebar .nav-tabs [role=tab][aria-selected=true] { color: var(--text); font-weight: 600; background: var(--chip-fill); border-color: transparent; }
+.unified-sidebar .nav-tabs [role=tab]::after { display: none; }
+.unified-sidebar .nav-tabs [role=tab]:hover:not([aria-selected=true]) { background: var(--hover); }
+.recent-heading { display: flex; align-items: baseline; justify-content: space-between; padding-inline-end: 12px; }
+.recent-heading .nav-heading { flex: 1; min-inline-size: 0; }
+.recent-order { position: relative; }
+.recent-order > summary { list-style: none; padding: 2px 4px; font-size: 11px; color: var(--subtext0); cursor: pointer; border-radius: 4px; }
+.recent-order > summary::-webkit-details-marker { display: none; }
+.recent-order > summary:hover { color: var(--text); background: var(--hover); }
+.recent-order > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.recent-order [role=group] { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-end: 0; z-index: 20; display: grid; min-inline-size: 120px; padding: 4px; border: 1px solid var(--surface1); border-radius: var(--radius-control); background: var(--base); box-shadow: var(--shadow-raised); }
+.recent-order [role=group] button { padding: 3px 8px; text-align: start; font: inherit; font-size: 12px; color: var(--subtext0); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.recent-order [role=group] button:hover { background: var(--hover); color: var(--text); }
+.recent-order [role=group] button[aria-pressed=true] { color: var(--accent); }
+.new-items { align-self: flex-start; margin: 0 10px 4px; padding: 1px 10px; font: inherit; font-size: 11.5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; cursor: pointer; }
+.recent-list { display: flex; flex-direction: column; min-block-size: 0; }
+.recent-row { display: block; }
+
+/* Kind shapes: the shape says the kind before colour does. Agents are round avatars (initial
+ * fallback); Surfaces use the page glyph; decisions are diamonds; permissions are shields. */
+.session-entry[data-avatar]::before, .session-avatar { flex: none; inline-size: 22px; block-size: 22px; margin-inline-start: 12px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface0)); color: var(--text); font-size: 10px; font-weight: 700; }
+.session-entry[data-avatar]::before { content: attr(data-avatar); }
+.session-avatar img { inline-size: 100%; block-size: 100%; border-radius: inherit; object-fit: cover; }
+/* The status is a small dot on the avatar's corner; no separate dot row. */
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot] { position: relative; }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot]::after { content: ""; position: absolute; inset-inline-start: 28px; inset-block-start: 17px; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--overlay0); box-shadow: 0 0 0 2px var(--mantle); }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=busy]::after { background: transparent; border: 1.5px solid var(--green); border-block-start-color: transparent; animation: es-sidebar-spin .8s linear infinite; }
+:root :is(.recent-list, .pinned-section) .session-entry > .nav-item > .dot { display: none; }
+@keyframes es-sidebar-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.recent-list, .pinned-section) .session-entry[data-dot=busy]::after { animation: none; border: 0; background: var(--green); }
+}
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=failed]::after { background: var(--red); }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=idle]::after { background: var(--overlay0); }
+:root :is(.recent-list, .pinned-section) .cloud-nav-entry .cloud-runtime-icon { display: none; }
+/* Kinds at row size: a tinted tile, then the shape. */
+:root .unified-sidebar .nav-kind { display: grid; place-items: center; flex: none; inline-size: 18px; block-size: 18px; border-radius: 5px; font-size: 11px; font-weight: 700; color: var(--text); background: color-mix(in srgb, var(--accent) 12%, var(--surface0)); }
+.nav-decision .nav-kind { position: relative; background: transparent; }
+.nav-decision[data-kind=decision] .nav-kind::before, .nav-decision[data-kind=blocker] .nav-kind::before,
+.nav-decision[data-kind=question] .nav-kind::before { content: ""; position: absolute; inset: 1px; background: color-mix(in srgb, var(--peach) 38%, transparent); transform: rotate(45deg); border-radius: 2px; }
+.nav-decision[data-kind=permission] .nav-kind::before { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--pink) 38%, transparent); clip-path: polygon(50% 0, 100% 18%, 100% 60%, 50% 100%, 0 60%, 0 18%); }
+:root .unified-sidebar :is(.nav-surface, .nav-try-shape) .surface-glyph { inline-size: 14px; block-size: 16px; padding: 2px; box-sizing: content-box; border-radius: 4px; background: color-mix(in srgb, var(--teal) 20%, var(--surface0)); color: var(--teal); }
+.kind-badge { flex: none; padding: 0 5px; border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 15px; color: var(--teal); background: color-mix(in srgb, var(--teal) 18%, transparent); }
+
+/* Compact is the default: one line. Expanded adds the secondary owner/host line. */
+:root .unified-sidebar[data-density=compact] :is(.recent-list, .needs-you-band) :is(.session-project, .nav-change, .nav-history-meta) { display: none; }
+:root .unified-sidebar[data-density=compact] .nav-item .nav-title { flex: 1 1 auto; min-inline-size: 0; }
+:root .needs-you-band .row-trailing { margin-inline-start: auto; }
+:root .unified-sidebar[data-density=compact] .recent-list .session-entry { contain-intrinsic-size: auto 30px; }
+:root .recent-list :is(.session-project, .nav-change, .nav-history-meta) { display: none; }
+.row-secondary { display: none; }
+:root .recent-list .nav-history-row { display: flex !important; align-items: center; gap: 6px; }
+:root .recent-list .nav-history-row .nav-kind { position: relative; display: grid; place-items: center; }
+:root .recent-list .nav-history-row .nav-kind { background: transparent; }
+:root .recent-list .nav-history-row .nav-kind::before { content: ""; position: absolute; inset: 1px; background: color-mix(in srgb, currentColor 35%, transparent); transform: rotate(45deg); border-radius: 2px; }
+:root .unified-sidebar[data-density=expanded] .recent-list .nav-item { flex-wrap: wrap; row-gap: 1px; }
+:root .unified-sidebar[data-density=expanded] .recent-list .nav-title { flex: 1 1 0; min-inline-size: 0; }
+:root .unified-sidebar[data-density=expanded] .recent-list .row-trailing { order: 2; }
+:root .unified-sidebar[data-density=expanded] .recent-list .row-secondary { display: block; order: 3; flex: 1 0 100%; margin-inline-start: 22px; font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry { align-items: flex-start; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry .row-secondary { margin-inline-start: 0; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry[data-avatar]::before, :root .unified-sidebar[data-density=expanded] .recent-list .session-avatar { margin-block-start: 3px; }
+:root .recent-list .session-entry .host-glyph { display: none; }
+
+/* Hover/focus/long-press preview. No side effects: it only describes the row. */
+.sidebar-preview { position: fixed; z-index: 70; inline-size: 300px; max-inline-size: min(300px, calc(100vw - 24px)); padding: 10px 12px 8px; border: 1px solid var(--surface1); border-radius: 10px; background: var(--base); box-shadow: 0 16px 44px rgb(0 0 0 / .45); pointer-events: none; }
+.sidebar-preview-kind { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--subtext0); }
+.sidebar-preview-title { margin-block: 2px 4px; font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.sidebar-preview-line { margin-block: 2px; font-size: 11.5px; color: var(--subtext0); overflow-wrap: anywhere; }
+.sidebar-preview-agent { color: var(--text); font-weight: 600; }
+.sidebar-preview-new { color: var(--text); }
+.sidebar-preview-decision { margin-block-start: 6px; }
+.sidebar-preview-options { list-style: none; margin: 2px 0 0; padding: 0; font-size: 12px; color: var(--subtext1); }
+.sidebar-preview-options li { display: flex; gap: 6px; align-items: baseline; padding-block: 1px; overflow-wrap: anywhere; }
+.sidebar-preview-options li[data-chosen] { color: var(--text); font-weight: 600; }
+.sidebar-preview-mark { flex: none; inline-size: 12px; text-align: center; color: var(--overlay0); }
+.sidebar-preview-options li[data-chosen] .sidebar-preview-mark { color: var(--green); }
+.sidebar-preview-recommended { font-weight: 400; color: var(--subtext0); font-size: 11px; }
+.sidebar-preview-answer { color: var(--text); }
+.sidebar-preview-foot { margin-block-start: 6px; padding-block-start: 5px; border-block-start: 1px solid var(--surface0); font-size: 10.5px; color: var(--overlay0); }
+@media (prefers-reduced-motion: reduce) { .sidebar-preview { scroll-behavior: auto; } }
+/* The Filter popover anchors to the sidebar's edge, not the small control, so its 232px panel stays
+ * inside a 240px rail. */
+.unified-sidebar { position: relative; }
+.unified-sidebar .sidebar-filter { position: static; }
+.unified-sidebar .sidebar-filter-panel { inset-inline-end: 8px; inset-block-start: 38px; inline-size: min(224px, calc(100vw - 16px)); }
+
+/* Compact trailing: the host tile and the row's own time at the inline end, visible in both densities. */
+:root .recent-list .nav-title { flex: 1 1 auto; min-inline-size: 0; }
+.row-trailing { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-inline-start: auto; padding-inline-start: 6px; font-size: 10.5px; color: var(--overlay1); font-variant-numeric: tabular-nums; }
+.row-trailing time { white-space: nowrap; }
+.host-tile { display: inline-grid; place-items: center; inline-size: 14px; block-size: 14px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 24%, var(--surface0)); color: var(--text); font-size: 9px; font-weight: 800; line-height: 1; }
+:root .recent-list .session-project { margin-inline-start: 6px; }
+/* Expanded Needs you rows: title on the first line, the owner/rev/what's-new line beneath. */
+:root .unified-sidebar[data-density=expanded] .needs-you-band .nav-item { flex-wrap: wrap; row-gap: 1px; }
+:root .unified-sidebar[data-density=expanded] .needs-you-band .nav-title { flex: 1 1 0; min-inline-size: 0; }
+:root .unified-sidebar[data-density=expanded] .needs-you-band :is(.session-project, .nav-change) { order: 3; flex: 1 0 100%; margin-inline-start: 24px; max-inline-size: none; font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Top of the sidebar: Agent map, Usage and Porter/Desk on one compact row. Three equal targets,
+ * icon over a short label at 240px; icons only in the collapsed rail. */
+.nav-quick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px 8px 6px; }
+.nav-quick-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; position: relative;
+  min-block-size: 44px; padding: 4px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--subtext0);
+  font: inherit; text-decoration: none; cursor: pointer; }
+.nav-quick-item:hover { background: var(--hover); color: var(--text); }
+.nav-quick-item.active { background: var(--selected); color: var(--text); }
+.nav-quick-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-quick-label { max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; line-height: 1; }
+.nav-quick-item .nav-avatar { inline-size: 16px; block-size: 16px; }
+.nav-quick-item .nav-busy { position: absolute; inset-block-start: 7px; inset-inline-end: 13px; }
+.nav-quick-open { position: absolute; inset-block-start: 18px; inset-inline-end: calc(50% - 14px); inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent); }
+.nav-entries.compact .nav-quick { grid-template-columns: 1fr; padding: 4px; }
+.nav-entries.compact .nav-quick-item { min-block-size: 34px; }
+
+/* Recent (All): one leading icon slot and one trailing time column for every row kind. Icon slot: 22px at 12px
+ * from the inline start; title 8px after it; time 10px from the inline end. The agent pin button floats over the
+ * time on hover/focus instead of taking a column, so agent and non-agent times line up. Logical properties only. */
+:root .recent-list { --row-icon-start: 12px; --row-icon: 22px; --row-icon-gap: 8px; --row-end: 10px; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) { position: relative; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .session-avatar,
+:root .recent-list .session-entry[data-avatar]::before { margin-inline-start: var(--row-icon-start); inline-size: var(--row-icon); block-size: var(--row-icon); }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item { padding-inline: var(--row-icon-gap) var(--row-end); gap: 6px; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item > :is(.dot, .cloud-runtime-icon, .host-glyph) { display: none; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .pin-action { position: absolute; inset-inline-end: 4px; inset-block-start: 50%; transform: translateY(-50%); margin: 0; background: var(--mantle); border-radius: 4px; }
+:root .recent-list .recent-row > .nav-item { padding-inline: var(--row-icon-start) var(--row-end); gap: var(--row-icon-gap); }
+:root .recent-list .recent-row > .nav-item > :is(.nav-kind, .surface-glyph):first-child { margin-inline: calc((var(--row-icon) - 18px) / 2); }
+:root .recent-list .nav-title { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root .recent-list .row-trailing { flex: none; margin-inline-start: auto; }
+
+/* Active (All view): agents running now, below Recent. */
+:root .active-section { margin-block-start: 8px; padding-block-start: 6px; border-block-start: 1px solid var(--surface0); }
+:root .recent-more { margin-inline-start: 12px; }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=pending]::after { background: var(--pink); }

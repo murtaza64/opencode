@@ -17,6 +17,7 @@ import { ringOnChange } from "../motion"
 import { ago, sessionHref, useDashboard } from "../state"
 import "./home.css"
 import "./map.css"
+import { clockTime } from "../local-time"
 
 type MailLoad = { state: "loading" | "ready" | "error"; messages: MapMail[]; error?: string }
 const LAYERS = [["all", "All events"], ["major", "Major events"], ["minor", "Minor updates"]] as const
@@ -205,7 +206,7 @@ export default function AgentMap() {
   </span>
   const Party = (props: { editspace: string; name: string }) => <Show when={partyKey(props.editspace, props.name)} fallback={<bdi dir="auto">{props.name}</bdi>}>{(key) =>
     <button class="map-link" onClick={() => select(key())}><bdi dir="auto">{name(props.editspace, props.name)}</bdi></button>}</Show>
-  const time = (at: number) => Number.isFinite(at) ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "?"
+  const time = (at: number) => clockTime(at, "?")
   const title = (cluster: ClusterBox) => `${cluster.project.toUpperCase()}${cluster.cloud ? " · CLOUD" : ""} · ${cluster.count} AGENT${cluster.count === 1 ? "" : "S"}`
 
   return <main class="attention-home agent-map-page">

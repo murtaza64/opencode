@@ -12,6 +12,7 @@ import { File } from "@opencode-ai/session-ui/file"
 import CloudPage from "./pages/cloud"
 import AgentMap from "./pages/map"
 import UsagePage from "./pages/usage"
+import GlassesPage from "./pages/glasses"
 import Desk from "./pages/desk"
 import SessionPage from "./pages/session"
 import NewSessionPage from "./pages/new-session"
@@ -22,15 +23,22 @@ import { DashboardProvider } from "./state"
 import { BriefsProvider } from "./desk-briefs"
 import { DeskQueueProvider } from "./desk-queue"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
+import { wrapUtcTimes } from "./utc-times"
+import { EntityRefs } from "./components/entity-ref"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
 import { trackModes } from "./components/mode-switch"
 import { DeskChatProvider, DeskCompanion } from "./desk-companion"
+import { GlassesProvider } from "./glasses/controller"
 import { installAppearance } from "./appearance"
 import { KeyboardLayer } from "./components/keyboard-layer"
 import { startPerfTelemetry } from "./perf-telemetry"
+import "./components/reasoning-chip"
+import { installAccessAuth } from "./access-auth"
 
+// Before any request: same-origin calls carry X-Requested-With so an expired Access session reads as Sign in.
+installAccessAuth()
 startPerfTelemetry()
 
 function Providers(props: ParentProps) {
@@ -62,13 +70,14 @@ function Providers(props: ParentProps) {
       frame = requestAnimationFrame(() => {
         frame = undefined
         // Our own decorations never need a second pass.
-        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .context-picker, .context-chips"))
+        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .context-picker, .context-chips, .utc-time"))
         dirty.clear()
         const set = new Set(added)
         const roots = added.filter((el) => { for (let up = el.parentElement; up; up = up.parentElement) if (set.has(up)) return false; return true })
         for (const root of roots) {
           wrapTicketRefs(root)
           wrapSessionRefs(root)
+          wrapUtcTimes(root)
         }
         if (roots.length) shellEl?.dispatchEvent(new Event("session-refs-wrapped"))
       })
@@ -92,7 +101,10 @@ function Providers(props: ParentProps) {
               <BriefsProvider>
               <DeskQueueProvider>
               <DeskChatProvider>
+              <GlassesProvider>
               <div class="shell" ref={shellEl}>
+                {/* One wallpaper for the whole window, behind the content and the companion split (appearance.css). */}
+                <div class="wallpaper-backdrop" aria-hidden="true" />
                 {/* One persistent left nav on every view; the Front desk chat is a companion pane. */}
                 <Sidebar />
                 <Show when={leftOpen()}>
@@ -102,8 +114,10 @@ function Providers(props: ParentProps) {
                 <DeskCompanion />
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
+                <EntityRefs container={() => shellEl} />
                 <KeyboardLayer />
               </div>
+              </GlassesProvider>
               </DeskChatProvider>
               </DeskQueueProvider>
               </BriefsProvider>
@@ -131,6 +145,7 @@ render(
       <Route path="/cloud" component={CloudPage} />
       <Route path="/agents" component={AgentMap} />
       <Route path="/usage" component={UsagePage} />
+      <Route path="/glasses" component={GlassesPage} />
       {/* The map became Agents mode's default page; keep old /map links working. */}
       <Route path="/map" component={MapRedirect} />
       <Route path="/new" component={NewSessionPage} />

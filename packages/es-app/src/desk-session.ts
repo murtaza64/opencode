@@ -5,14 +5,31 @@
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
-import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { oc, ocAt, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { readHost, workFeedHosts } from "./host"
+import { earlierDesks, placement, resolveHome, sharedNotice, writePointer, type DeskHome, type Placement, type PointerView } from "./desk-pointer"
+import { unresolvedSend } from "./composer"
+import type { SessionHost } from "./session-host"
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { DESK } from "./desk-identity"
+import { createServerEvents } from "./event-source"
+import { pageHidden } from "./page-visible"
 
 const POINTER = "es-app:front-desk:1"
-const NOTE = "es-app:front-desk:context:1"
+// This device's desks that a shared desk replaced, kept so they stay one tap away, and the shared desk last announced.
+const EARLIER = "es-app:front-desk:earlier:1"
+const SHARED_SEEN = "es-app:front-desk:shared-seen:1"
+// The remote home's desk last read, so an input to it is still reconciled while the home cannot be read.
+const HOME_DESK = "es-app:front-desk:home-desk:1"
+// How often a device whose desk lives on another host re-reads the home, to fall back or fail back.
+const HOME_POLL = 15_000
+// Longest the desk chat waits for the host and home reads before it loads this device's own desk.
+const HOME_READ_LIMIT = 5_000
+// Per desk session: what its context notes have told it so far (NoteState).
+const NOTE = "es-app:front-desk:context:2"
 const PENDING = "es-app:front-desk:brief-create:1"
 const AGENT = "front-desk"
 /** The model the Front Desk chat and its brief jobs run on is the host's own: the `front-desk` agent's model
@@ -42,16 +59,22 @@ const readJSON = <T,>(key: string, valid: (value: any) => boolean): T | undefine
 }
 
 type CreateBody = Parameters<typeof oc.createSession>[1] & { id: string }
-/** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. */
-export type DeskPointer = { session: string; directory: string; create?: CreateBody }
+/** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. `host` is
+ * set when the profile's desk lives on another Work host (its home); this device's own pointer is then kept, unused. */
+export type DeskPointer = { session: string; directory: string; create?: CreateBody; host?: SessionHost & { id: string; label: string } }
 
 /** The saved Front Desk chat session id, read from local storage only (no request). */
 export const deskSessionID = () => readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string")?.session
 
 export const createDeskSession = () => {
-  const [pointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
+  const [devicePointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
+  // The profile's home (desk-pointer-contract-v1). A remote home's desk replaces this device's pointer for the view.
+  const [home, setHome] = createSignal<DeskHome>({ kind: "off" })
+  const [remote, setRemote] = createSignal<DeskPointer>()
+  const pointer = () => remote() ?? devicePointer()
+  const client = () => ocAt(pointer()?.host?.base ?? "/oc")
   const [session, setSession] = createSignal<Session>()
-  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed">(pointer() ? "checking" : "none")
+  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed" | "remote-none" | "home-offline" | "home-claim">("checking")
   const [error, setError] = createSignal("")
   const save = (value?: DeskPointer) => {
     if (value) localStorage.setItem(POINTER, JSON.stringify(value))
@@ -74,12 +97,14 @@ export const createDeskSession = () => {
     const host = await readHostModel()
     const model = host.available ? host.model : undefined
     if (!model || current.preferredModel || (current.model?.providerID === model.providerID && current.model.id === model.modelID)) return
+    if (pointer()?.host) return
     await oc.preferModel(current.id, current.directory, model).then(setSession, () => undefined)
   }
-  const verify = async () => {
-    const current = pointer()
+  /** `quiet`: a background re-check of a desk that could not be read; it leaves the warning up until the read answers. */
+  const verifyDevice = async (quiet = false) => {
+    const current = devicePointer()
     if (!current) return setStatus("none")
-    setStatus("checking")
+    if (!quiet) setStatus("checking")
     try {
       confirmed(await oc.session(current.session, current.directory))
     } catch (cause) {
@@ -90,7 +115,126 @@ export const createDeskSession = () => {
       setStatus(missing ? "missing" : "unavailable")
     }
   }
+  /** Adopt the home's pointer on this host: it becomes this device's pointer too. */
+  const [replaced, setReplaced] = createSignal(readJSON<{ session: string; directory: string }[]>(EARLIER, value => Array.isArray(value)) ?? [])
+  const [seen, setSeen] = createSignal(readJSON<string>(SHARED_SEEN, value => typeof value === "string"))
+  // This device's own earlier desk becomes a read-only Earlier link, never deleted.
+  const retire = (current?: string) => {
+    const old = devicePointer()
+    if (!old || old.create || old.session === current || replaced().some(entry => entry.session === old.session)) return
+    const next = [{ session: old.session, directory: old.directory }, ...replaced()].slice(0, 10)
+    setReplaced(next)
+    try { localStorage.setItem(EARLIER, JSON.stringify(next)) } catch { /* remembered for this page */ }
+  }
+  const adopt = (view: PointerView) => {
+    if (!view.session || !view.directory) return
+    retire(view.session)
+    if (devicePointer()?.session !== view.session) try { save({ session: view.session, directory: view.directory }) } catch { setPointer({ session: view.session, directory: view.directory }) }
+  }
+  // Placement (desk-pointer `placement`): with a remote home, input goes to the home's desk while it answers; when it
+  // stays unreachable, to this device's own existing desk on this host ("fallback"). Each switch waits until no input
+  // on the desk being left is in flight or of unknown outcome (the composer's own receipts for that exact session).
+  const [placed, setPlaced] = createSignal<"home" | "fallback">("home")
+  const [decision, setDecision] = createSignal<Placement>()
+  let homeSeen: { up: boolean; since: number } | undefined
+  let settled = ""
+  const homeDesk = () => remote() ?? readJSON<DeskPointer>(HOME_DESK, value => typeof value?.session === "string" && typeof value?.directory === "string" && typeof value?.host?.id === "string")
+  const place = (resolved: DeskHome) => {
+    if (resolved.kind !== "remote" && resolved.kind !== "unreachable") return
+    const up = resolved.kind === "remote"
+    const now = Date.now()
+    if (homeSeen?.up !== up) homeSeen = { up, since: now }
+    const own = devicePointer()
+    const local = own && !own.create ? own : undefined
+    const left = placed() === "home" ? homeDesk() : local
+    const unsettled = left && unresolvedSend(left.session, left.directory, undefined, placed() === "home" ? left.host : undefined) ? 1 : 0
+    const next = placement({ homeUp: up, since: homeSeen.since, now, current: placed(), local, unsettled })
+    setDecision(next)
+    // Never a new conversation: without this device's own desk there is nothing to fall back to.
+    return next === "fallback" && local ? "fallback" as const : "home" as const
+  }
+  /** `quiet`: a background re-read; it changes nothing on screen unless the home or the placement changed. */
+  const verify = async (quiet = false) => {
+    if (!quiet) setStatus("checking")
+    // The chat waits on this, so a host read that hangs or fails must not leave it on "Loading chat…": after the
+    // bound it continues as if no home were configured (this device's own desk), and a later check catches up.
+    const resolved = await Promise.race([
+      readHost().then(info => resolveHome(workFeedHosts(info))),
+      new Promise<DeskHome>(resolve => setTimeout(() => resolve({ kind: "off" }), HOME_READ_LIMIT)),
+    ]).catch((): DeskHome => ({ kind: "off" }))
+    const where = place(resolved)
+    const key = JSON.stringify([resolved.kind, where, resolved.kind === "remote" ? resolved.view.session ?? null : null])
+    setHome(resolved)
+    // A desk that could not be read (Core answered 5xx or not at all) is read again on every poll, so a transient Core
+    // failure clears without the human pressing Check again.
+    const recheck = quiet && key === settled
+    if (recheck && status() !== "unavailable") return
+    settled = key
+    setPlaced(where ?? "home")
+    if (where === "fallback") {
+      setRemote(undefined)
+      return verifyDevice(recheck)
+    }
+    if (resolved.kind === "unreachable") return setStatus("home-offline")
+    if (resolved.kind === "remote") {
+      setRemote(undefined)
+      if (!resolved.view.session || !resolved.view.directory) return setStatus("remote-none")
+      const value = { session: resolved.view.session, directory: resolved.view.directory, host: resolved.host }
+      setRemote(value)
+      try { localStorage.setItem(HOME_DESK, JSON.stringify(value)) } catch { /* reconciled this page only */ }
+      try {
+        setSession(await ocAt(resolved.host.base).session(value.session, value.directory))
+        return setStatus("ready")
+      } catch { return setStatus("unavailable") }
+    }
+    // A home with no desk yet starts a new conversation on first use (admit writes `create`); this device's earlier
+    // desk is never imported, since the human chose a fresh Work desk on the home (front-desk:work-home:v1). Earlier
+    // desks stay readable from their own hosts.
+    if (resolved.kind === "local" && resolved.view.session) adopt(resolved.view)
+    // This host's own conversation is offered, never claimed silently: the human either makes it the Work desk or
+    // starts a new one (it stays readable under Earlier desks).
+    if (resolved.kind === "local" && !resolved.view.session && devicePointer() && !devicePointer()!.create) {
+      await verifyDevice()
+      if (status() === "ready") return setStatus("home-claim")
+      retire()
+      try { save(undefined) } catch { setPointer(undefined) }
+      return setStatus("none")
+    }
+    await verifyDevice(recheck)
+  }
+  /** Re-read the home now: it may have been turned on or off since this page loaded. */
+  const freshHome = async () => {
+    const resolved = await Promise.race([
+      readHost().then(info => resolveHome(workFeedHosts(info))),
+      new Promise<DeskHome>(resolve => setTimeout(() => resolve(home()), HOME_READ_LIMIT)),
+    ]).catch(() => home())
+    setHome(resolved)
+    return resolved
+  }
+  /** On the home host with no Work desk yet: make this host's own conversation the Work desk (same session). */
+  const claim = async () => {
+    const own = devicePointer()
+    const current = await freshHome()
+    if (status() !== "home-claim" || !own || own.create || current.kind !== "local") return verify()
+    const result = await writePointer({ expected_revision: current.view.revision, session: own.session, directory: own.directory, reason: "create" })
+    if (!result.ok && !result.view) setError(`Could not make this ${DESK.name}: ${result.error}`)
+    await verify()
+  }
+  /** On the home host with no Work desk yet: keep this host's conversation as an earlier desk and start a new one. */
+  const startNew = (directory: string) => {
+    if (status() !== "home-claim") return
+    retire()
+    try { save(undefined) } catch { setPointer(undefined) }
+    setSession(undefined)
+    setStatus("none")
+    return start(directory)
+  }
   onMount(() => void verify())
+  const poll = setInterval(() => {
+    const kind = home().kind
+    if (kind === "remote" || kind === "unreachable" || placed() === "fallback" || status() === "unavailable") void verify(true)
+  }, HOME_POLL)
+  onCleanup(() => clearInterval(poll))
   const admit = async (value: DeskPointer & { create: CreateBody }) => {
     setStatus("creating")
     setError("")
@@ -98,6 +242,14 @@ export const createDeskSession = () => {
       const created = await oc.createSession(value.directory, value.create)
       if (created.id !== value.session) throw new SessionCreateError("Core confirmed a different session than requested.", true)
       confirmed(created)
+      // The home is read again: this page may have loaded before its host became the home.
+      const current = await freshHome()
+      // On the home host the new desk claims the profile's pointer; if another device won, its desk is adopted and
+      // this one stays an ordinary session (nothing deleted).
+      if (current.kind === "local") {
+        const result = await writePointer({ expected_revision: current.view.revision, session: created.id, directory: created.directory, reason: "create" })
+        if (!result.ok && result.view?.session && result.view.session !== created.id) { adopt(result.view); await verifyDevice() }
+      }
     } catch (cause) {
       setError(cause instanceof SessionCreateError ? cause.message : String(cause))
       if (cause instanceof SessionCreateError && !cause.uncertain) {
@@ -110,13 +262,16 @@ export const createDeskSession = () => {
   const start = async (directory: string) => {
     if (status() !== "none") return
     setStatus("creating")
+    // A home elsewhere that appeared after this page loaded owns the desk: nothing is created here.
+    const where = await freshHome()
+    if (where.kind === "remote" || where.kind === "unreachable") return verify()
     const [agents, host] = await Promise.all([oc.agents(directory).catch(() => []), readHostModel()])
     const id = `ses_${descending()}`
     const value = {
       session: id, directory,
       create: {
         id,
-        title: "Front desk",
+        title: DESK.name,
         ...(agents.some(agent => agent.name === AGENT) ? { agent: AGENT } : {}),
         // Without a usable host model the agent's own resolution applies, and Core reports any failure.
         ...(host.available && host.model ? { model: { providerID: host.model.providerID, id: host.model.modelID } } : {}),
@@ -126,7 +281,7 @@ export const createDeskSession = () => {
     }
     // Saved before the request: without a durable identity a lost response could orphan a conversation.
     try { save(value) } catch {
-      setError("Could not save the front desk identity locally, so no conversation was created. Free browser storage and try again.")
+      setError(`Could not save ${DESK.name}'s identity locally, so no conversation was created. Free browser storage and try again.`)
       return setStatus("none")
     }
     await admit(value)
@@ -143,40 +298,59 @@ export const createDeskSession = () => {
     setStatus("none")
   }
 
-  /** Generated context for the next idle send, only when the desk's view changed since the last accepted one. */
-  const context = (input: Parameters<typeof deskContext>[0]): ContextPart[] => {
-    const current = session()
-    if (!current) return []
-    const note = deskContext(input)
-    if (localStorage.getItem(`${NOTE}:${current.id}`) === note.key) return []
+  // Notes offered to a send but not yet accepted, by part key: only an accepted plain send records what the desk knows.
+  const offered = new Map<string, NoteState | undefined>()
+  const told = (id: string) => readJSON<NoteState>(`${NOTE}:${id}`, value => typeof value?.sections === "object" && typeof value?.full === "number")
+  // Every note offered gets the next number, kept per session so it only grows.
+  const nextSeq = (id: string) => {
+    const seq = nextNoteSeq(readJSON<number>(`${NOTE}:${id}:seq`, value => Number.isInteger(value)), Date.now())
+    try { localStorage.setItem(`${NOTE}:${id}:seq`, JSON.stringify(seq)) } catch { /* numbering restarts; still increasing this page */ }
+    return seq
+  }
+  const offer = (id: string, build: (seq: number) => ReturnType<typeof contextNote>): ContextPart[] => {
+    if (!build(0)) return []
+    const note = build(nextSeq(id))!
+    offered.set(note.key, note.state)
     return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
   }
+  /** Generated context for the next send: a complete note for a Core input, otherwise what changed since the last
+   * accepted note. */
+  const context = (input: Parameters<typeof deskContext>[0], send: { input: boolean }): ContextPart[] => {
+    const current = session()
+    if (!current) return []
+    const sections = deskContext(input).sections
+    return offer(current.id, seq => contextNote(sections, told(current.id), input.now, { input: send.input, seq }))
+  }
   /** Off the Decisions page there is no queue view, but the desk's open cases still go with the next send that
-   * changes them: the same keyed note, holding only those lines. */
-  const caseContext = (lines: string[]): ContextPart[] => {
+   * changes them, as a cases-only note. */
+  const caseContext = (lines: string[], send: { input: boolean }): ContextPart[] => {
     const current = session()
     if (!current || !lines.length) return []
-    const key = JSON.stringify(["cases", lines])
-    if (localStorage.getItem(`${NOTE}:${current.id}`) === key) return []
-    const text = ["Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", ...lines].join("\n")
-    return [{ type: "text", text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key } }]
+    const cases = deskContext({ now: Date.now(), sources: [], items: [], briefs: [], cases: lines }).sections.filter(section => section.name === "cases")
+    return offer(current.id, seq => contextNote(cases, told(current.id), Date.now(),
+      { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", input: send.input, seq }))
   }
-  // An unconfirmed send leaves the key unrecorded, so the next send carries the context again.
-  const sent = (parts: ContextPart[], accepted: boolean) => {
+  // Records against what is stored now (recordNote). An unconfirmed plain send records nothing, so the next send
+  // repeats it; any Core input attempt, admitted or not, makes the next plain note complete.
+  const sent = (parts: ContextPart[], accepted: boolean, send: { input: boolean }) => {
     const current = session()
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
-    if (current && key && accepted) localStorage.setItem(`${NOTE}:${current.id}`, key)
+    if (!current || !key || !offered.has(key)) return
+    const next = recordNote(told(current.id), offered.get(key), send, accepted)
+    if (next) localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify(next))
+    // An unconfirmed plain send stays offered: the same note may still be confirmed.
+    if (accepted || send.input) offered.delete(key)
   }
   /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
    * the composer's draft is untouched. Starts the conversation first if there is none yet. */
   const detail = async (text: string, parts: ContextPart[], directory?: string) => {
     if (status() === "none" && directory) await start(directory)
     const current = session()
-    if (!current) return "The front desk chat is not available yet."
+    if (!current) return `${DESK.name} is not available yet.`
     // The conversation's own agent and model preference; without a preference, the desk model.
-    const fresh = await oc.session(current.id, current.directory).catch(() => current)
+    const fresh = await client().session(current.id, current.directory).catch(() => current)
     try {
-      await oc.promptBody(current.id, current.directory, {
+      await client().promptBody(current.id, current.directory, {
         ...(fresh.agent ? { agent: fresh.agent } : {}),
         ...(fresh.preferredModel || !deskModel() ? {} : { model: deskModel()! }),
         parts: [{ type: "text", text }, ...parts],
@@ -185,7 +359,22 @@ export const createDeskSession = () => {
       return `Not sent: ${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
-  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail }
+  // A remote home leaves this device's own pointer in place; it counts as an earlier desk until adopted elsewhere.
+  const earlier = () => earlierDesks(home(), pointer()?.session,
+    [...replaced(), ...(remote() && devicePointer() && !devicePointer()!.create ? [{ session: devicePointer()!.session, directory: devicePointer()!.directory }] : [])])
+  const notice = () => status() === "ready" && sharedNotice(home(), pointer()?.session, earlier(), seen())
+  const dismissNotice = () => {
+    const current = pointer()?.session
+    if (!current) return
+    setSeen(current)
+    try { localStorage.setItem(SHARED_SEEN, JSON.stringify(current)) } catch { /* shown again next page */ }
+  }
+  /** Is this the profile's Front Desk conversation: the current desk on its host, or this device's own desk (its
+   * fallback when the home is unreachable). Identity comes from the pointers, never the title. */
+  const isDesk = (sessionID: string, hostID?: string) =>
+    (pointer()?.session === sessionID && pointer()?.host?.id === hostID)
+    || (!hostID && devicePointer()?.session === sessionID && !devicePointer()?.create)
+  return { pointer, home, placed, decision, isDesk, session, status, error, setError, verify, start, claim, startNew, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
@@ -279,23 +468,38 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   // "unknown" is not settled: a job read between its prompt's admission and Core reporting it busy looks stopped,
   // and caching that would show "Brief stopped before finishing" beside a brief that finished moments later.
   const isSettled = (job: BriefJob) => ["ready", "failed"].includes(job.state.state)
-  const absent = new Map<string, number>()
+  // Other projects' anchors: last-known children, and the anchors to read on the next refresh. They are never read on
+  // the poll timer (approved removal, attention ddc5f6e6): only on mount, an explicit refresh, window focus or
+  // showing the page, a Core session event under that anchor, or while it holds an unfinished brief.
+  const elsewhereChildren = new Map<string, Session[]>()
+  const wanted = new Set<string>()
+  let everything = true
   const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []
-    // Other anchors are read only. One that does not exist (never used) is not asked again for a few minutes, so
-    // N unused projects are not N reads per poll. Without this project's own anchor, those briefs still show.
-    const elsewhere = others().filter(other => other.session !== target?.session && (absent.get(other.session) ?? 0) < Date.now())
+    // Other anchors are read only. Without this project's own anchor, those briefs still show.
+    const unfinished = (session: string) => (elsewhereChildren.get(session) ?? []).some(child => metaOf(child) && !settled.has(child.id))
+    const elsewhere = others().filter(other => other.session !== target?.session)
+    const all = explicit || everything
+    everything = false
+    const reading = elsewhere.filter(other => all || wanted.has(other.session) || unfinished(other.session))
+    for (const other of reading) wanted.delete(other.session)
     if (!target && !elsewhere.length) return setJobs(local())
     const current = ++generation
     try {
-      const [children, status, ...extra] = await Promise.all([target ? client.children(target.session, target.directory) : [], target ? client.status(target.directory) : ({} as Awaited<ReturnType<typeof oc.status>>),
-        ...elsewhere.map(other => Promise.all([client.children(other.session, other.directory), client.status(other.directory)])
-          .catch(cause => { if (String(cause).includes("404")) absent.set(other.session, Date.now() + 300_000); return undefined }))])
-      const statuses = Object.assign({}, ...extra.flatMap(value => value ? [value[1]] : []), status) as typeof status
+      const childrenOf = (anchor: DeskPointer) => client.children(anchor.session, anchor.directory)
+      // A failed read keeps the last-known list and is retried on the next focus, event or explicit refresh.
+      const [children] = await Promise.all([target ? childrenOf(target) : [], limited(reading, 3, other => childrenOf(other).then(
+        list => { elsewhereChildren.set(other.session, list) }, () => {}))])
+      const present = new Set(elsewhere.map(other => other.session))
+      for (const session of elsewhereChildren.keys()) if (!present.has(session)) elsewhereChildren.delete(session)
       const seen = new Set<string>()
-      const briefs = [...children, ...extra.flatMap(value => value?.[0] ?? [])].filter(child => !seen.has(child.id) && seen.add(child.id))
+      const briefs = [...children, ...[...elsewhereChildren.values()].flat()].filter(child => !seen.has(child.id) && seen.add(child.id))
         .flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
+      // Status is directory-wide and only decides whether a brief is still running: read it only where a brief
+      // could be (the target, when it has briefs) and is not already settled.
+      const directories = [...new Set(briefs.filter(({ child }) => explicit || !settled.has(child.id) || child.id === inflight()).map(({ child }) => child.directory))]
+      const statuses = Object.assign({}, ...await limited(directories, 3, directory => client.status(directory).catch(() => ({})))) as Awaited<ReturnType<typeof oc.status>>
       const live = (id: string) => ["busy", "retry"].includes(statuses[id]?.type ?? "")
       const stale = briefs.filter(({ child }) => explicit || !settled.has(child.id) || live(child.id) || child.id === inflight())
       const read = await limited(stale, 4, ({ child, meta }) => client.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
@@ -324,6 +528,28 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   createEffect(on(() => desk()?.session, (session, previous) => { if (session && session !== previous) void refresh() }, { defer: true }))
   onMount(() => {
     void refresh()
+    // A new or changed brief under another project's anchor marks that anchor for the next read.
+    const events = createServerEvents(`${options.prefix ?? ""}/oc/global/event`, { types: ["session.created", "session.updated", "session.deleted"] })
+    events.onmessage = (message) => {
+      const parent = (JSON.parse(message.data) as { payload?: { properties?: { info?: { parentID?: string } } } }).payload?.properties?.info?.parentID
+      if (!parent || !others().some(other => other.session === parent)) return
+      wanted.add(parent)
+      void refresh()
+    }
+    // A reopened stream (reconnect, page shown again) may have missed events: reread every anchor. The first
+    // open follows the mount read above.
+    let opened = false
+    events.onopen = () => { if (opened) { everything = true; void refresh() } opened = true }
+    // Focus rereads every anchor at most every ten minutes, a bound on a missed event.
+    let lastFocus = Date.now()
+    const focused = () => {
+      if (pageHidden() || Date.now() - lastFocus < 600_000) return
+      lastFocus = Date.now()
+      everything = true
+      void refresh()
+    }
+    if (typeof window !== "undefined") window.addEventListener("focus", focused)
+    onCleanup(() => { events.close(); if (typeof window !== "undefined") window.removeEventListener("focus", focused) })
     let timer: ReturnType<typeof setTimeout>
     const tick = () => {
       const active = jobs().some(job => job.state.state === "running" || job.state.state === "starting")

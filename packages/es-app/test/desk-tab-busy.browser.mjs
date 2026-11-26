@@ -8,11 +8,11 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const preview = await startPanelPreview()
 const fixture = preview.fixture
 fixture.status = "idle"
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
-const nav = page.locator('.nav-entry[data-nav="front-desk"]')
+const nav = page.locator('[data-nav="front-desk"]')
 const dot = nav.locator(".nav-busy")
 // The app reads cross-session status from the global stream ({directory, payload}).
 const globalStatus = (sessionID, type, dir = directory) => {
@@ -31,7 +31,7 @@ try {
   await page.waitForTimeout(1000)
   globalStatus("ses_a", "busy")
   await expect(dot).toHaveCount(1)
-  await expect(dot).toHaveAttribute("aria-label", "Front desk is working")
+  await expect(dot).toHaveAttribute("aria-label", "Porter is working")
   const tab = await nav.boundingBox()
   globalStatus("ses_a", "idle")
   await expect(dot).toHaveCount(0)

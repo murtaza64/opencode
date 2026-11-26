@@ -184,6 +184,39 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(hostWriteAllowed("POST", "/es/api/handoffs/self")).toBe(false)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/briefs/0b7c6f1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e/regenerate")).toBe(true)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/briefs/nope/regenerate")).toBe(false)
+  expect(hostWriteAllowed("POST", "/es/api/frontdesk/deliverables/seen")).toBe(true)
+  // The Front Desk pointer is read through /hosts; it is written only on the home host's own origin.
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/cases")).toBe(true)
+  expect(hostApiAllowed("POST", "/es/api/frontdesk/cases") || hostWriteAllowed("POST", "/es/api/frontdesk/cases")).toBe(false)
+  expect(hostApiAllowed("HEAD", "/es/api/frontdesk/pointer")).toBe(true)
+  for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(hostApiAllowed(method, "/es/api/frontdesk/pointer") || hostWriteAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer/x")).toBe(false)
+  // A compact page's tool attachment is read from its own host (GET/HEAD only, one exact shape).
+  expect(hostApiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
+  expect(hostApiAllowed("HEAD", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/12")).toBe(true)
+  for (const pathname of ["/oc/session/ses_a/message/msg_b/part/prt_c/attachment/x", "/oc/session/ses_a/message/msg_b/part/prt_c", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0/raw"])
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  expect(hostApiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0") || hostWriteAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(false)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
+  // A compact page's file part (pasted image) bytes, the same way (runtime-lag #895).
+  expect(hostApiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(true)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(true)
+  for (const pathname of ["/oc/session/ses_a/message/msg_b/part/prt_c/file/x", "/oc/session/ses_a/message/msg_b/part/prt_c/files"])
+    expect(hostApiAllowed("GET", pathname) || apiAllowed("GET", pathname)).toBe(false)
+  expect(hostApiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/file") || hostWriteAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(false)
+  // On its own host (listener or paired gateway) the pointer is read and written; nothing else on that path.
+  expect(apiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
+  // The persona registry (name, owner lane, clean avatar URL) is a read for this host's own pages and paired phones only.
+  expect(apiAllowed("GET", "/es/api/personas")).toBe(true)
+  for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/personas")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/personas/x")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/personas")).toBe(false)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/pointer")).toBe(true)
+  for (const method of ["POST", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/pointer/x")).toBe(false)
+  for (const [method, pathname] of [["GET", "/es/api/frontdesk/deliverables/seen"], ["PUT", "/es/api/frontdesk/deliverables/seen"], ["POST", "/es/api/frontdesk/deliverables/seen/x"], ["POST", "/es/api/frontdesk/deliverables"]])
+    expect(hostWriteAllowed(method!, pathname!)).toBe(false)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/memory")).toBe(false)
   expect(hostApiAllowed("POST", "/es/api/frontdesk/briefs/0b7c6f1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e/regenerate")).toBe(false)
   expect(hostWriteAllowed("DELETE", "/es/api/handoffs/self/req_1")).toBe(false)
@@ -244,7 +277,7 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
     "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/x",
     "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0/raw",
     "/oc/session/ses_a/message/msg_b/part/../attachment/0",
-    "/oc/session/ses_a/message/msg_b/part/prt_c",
+    // The bare part (Core part.get) is allowed for compact-page hydration; only the part list is not.
     "/oc/session/ses_a/message/msg_b/part",
   ]) expect(apiAllowed("GET", pathname)).toBe(false)
 })
@@ -290,6 +323,104 @@ test("a tool attachment is proxied keyed, without browser credentials, keeping C
   const other = await fetch(`${server.origin}/oc/session/ses_a/message/msg_b`, { headers: { "x-editspace-key": server.key } })
   expect(other.headers.get("cache-control")).toBe("no-store")
   expect(other.headers.get("content-security-policy")).toContain("script-src 'self'")
+})
+
+test("a client that leaves a proxied event stream closes its upstream connection to Core", async () => {
+  // Raw TCP upstream: the open socket count is what Core would see.
+  const open = new Set<import("node:net").Socket>()
+  const core = (await import("node:net")).createServer((socket) => {
+    open.add(socket)
+    socket.on("close", () => open.delete(socket))
+    socket.on("error", () => {})
+    socket.once("data", () => socket.write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n11\r\ndata: connected\n\n\r\n"))
+  }).listen(0, "127.0.0.1")
+  await new Promise((resolve) => core.once("listening", resolve))
+  cleanup.push(async () => void core.close())
+  const opencode = `http://127.0.0.1:${(core.address() as { port: number }).port}`
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-stream-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, opencode, dashboard: opencode })
+  cleanup.push(server.close)
+  for (const _ of [1, 2, 3]) {
+    const abort = new AbortController()
+    const response = await fetch(`${server.origin}/oc/event`, { headers: { "x-editspace-key": server.key }, signal: abort.signal })
+    expect(new TextDecoder().decode((await response.body!.getReader().read()).value)).toBe("data: connected\n\n")
+    abort.abort()
+  }
+  const deadline = Date.now() + 5_000
+  while (open.size && Date.now() < deadline) await Bun.sleep(25)
+  expect(open.size).toBe(0)
+})
+
+// An upstream that accepts and never answers: what a stalled Core or dashboard looks like to the proxy (DD #921).
+const silentUpstream = async () => {
+  const open = new Set<import("node:net").Socket>()
+  const requests: string[] = []
+  const core = (await import("node:net")).createServer((socket) => {
+    open.add(socket)
+    socket.on("close", () => open.delete(socket))
+    socket.on("error", () => {})
+    socket.on("data", (chunk) => requests.push(String(chunk).split("\r\n")[0]!))
+  }).listen(0, "127.0.0.1")
+  await new Promise((resolve) => core.once("listening", resolve))
+  cleanup.push(async () => void core.close())
+  const origin = `http://127.0.0.1:${(core.address() as { port: number }).port}`
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-silent-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, opencode: origin, dashboard: origin })
+  cleanup.push(server.close)
+  return { server, open, requests }
+}
+
+test("a client that leaves a read before the upstream answers frees the upstream connection within a second", async () => {
+  const { server, open, requests } = await silentUpstream()
+  for (const route of ["/oc/session/ses_a/message", "/es/api/state", "/oc/event"]) {
+    const abort = new AbortController()
+    const pending = fetch(`${server.origin}${route}`, { headers: { "x-editspace-key": server.key }, signal: abort.signal }).catch(() => undefined)
+    const sent = Date.now() + 2_000
+    while (!requests.some((line) => line.includes(route.slice(3))) && Date.now() < sent) await Bun.sleep(10)
+    expect(open.size).toBeGreaterThan(0)
+    abort.abort()
+    await pending
+    const deadline = Date.now() + 1_000
+    while (open.size && Date.now() < deadline) await Bun.sleep(25)
+    expect(open.size).toBe(0)
+  }
+})
+
+test("a client that leaves a write before the upstream answers does not cut the write short", async () => {
+  const { server, open, requests } = await silentUpstream()
+  const abort = new AbortController()
+  const pending = fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", headers: { "x-editspace-key": server.key, "content-type": "application/json", origin: server.origin },
+    body: JSON.stringify({ parts: [] }), signal: abort.signal }).catch(() => undefined)
+  const sent = Date.now() + 2_000
+  while (!requests.some((line) => line.includes("prompt_async")) && Date.now() < sent) await Bun.sleep(10)
+  expect(open.size).toBe(1)
+  abort.abort()
+  await pending
+  await Bun.sleep(500)
+  // The upstream write stays open for its answer (bounded by the proxy's idle timeout), never half-applied.
+  expect(open.size).toBe(1)
+})
+
+test("a client that leaves a write mid-body cuts the upstream request (no half-received body held open)", async () => {
+  const { server, open, requests } = await silentUpstream()
+  const abort = new AbortController()
+  let push!: ReadableStreamDefaultController<Uint8Array>
+  const body = new ReadableStream<Uint8Array>({ start: (controller) => { push = controller } })
+  const pending = fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", signal: abort.signal, body, duplex: "half",
+    headers: { "x-editspace-key": server.key, "content-type": "application/json", "content-length": "1000", origin: server.origin } } as RequestInit).catch(() => undefined)
+  push.enqueue(new TextEncoder().encode('{"parts":['))
+  const sent = Date.now() + 2_000
+  while (!requests.some((line) => line.includes("prompt_async")) && Date.now() < sent) await Bun.sleep(10)
+  expect(open.size).toBe(1)
+  abort.abort()
+  await pending
+  const deadline = Date.now() + 1_000
+  while (open.size && Date.now() < deadline) await Bun.sleep(25)
+  expect(open.size).toBe(0)
 })
 
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {
@@ -444,6 +575,12 @@ test("self-handoff POST and DELETE reach only this host's dashboard with operato
     expect((await get(pathname, { method, body: "{}", headers: { ...headers, origin: "https://evil.test" } })).status).toBe(403)
     expect((await get(pathname, { method, body: "{}", headers: { cookie: headers.cookie, "content-type": "application/json" } })).status).toBe(403)
   }
+})
+
+test("the gateway exposes the subscription quota snapshot only as an exact read", () => {
+  expect(apiAllowed("GET", "/es/api/quota")).toBe(true)
+  for (const pathname of ["/es/api/quota/claude", "/es/api/quota/", "/es/api/quotas"]) expect(apiAllowed("GET", pathname)).toBe(false)
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/quota")).toBe(false)
 })
 
 test("only exact pin routes are exposed", () => {
@@ -725,6 +862,26 @@ test("re-checking an answer's delivery and regenerating a brief reach the dashbo
   expect(apiAllowed("POST", "/es/api/frontdesk/briefs/not-a-record/regenerate")).toBe(false)
   expect(apiAllowed("GET", `/es/api/frontdesk/briefs/${record}/regenerate`)).toBe(false)
   expect(apiAllowed("POST", `/es/api/attention/${record}/delivery/x`)).toBe(false)
+})
+
+test("Ori key usage is read-only on the local desktop listener", async () => {
+  const { get } = await setup()
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(true)
+  for (const route of ["/es/api/frontdesk/archive", "/es/api/frontdesk/archive/search", "/es/api/frontdesk/archive/doc/release-flow", "/es/api/frontdesk/archive/doc/sessions/2026-11-23-ses_e0649e688ffeM3YMm3i13AVsxL"])
+    expect(apiAllowed("GET", route)).toBe(true)
+  for (const method of ["PUT", "DELETE"]) expect(apiAllowed(method, "/es/api/frontdesk/archive/doc/sessions/2026-11-23-ses_e0649e688ffeM3YMm3i13AVsxL")).toBe(true)
+  for (const route of ["/es/api/frontdesk/archive/doc/../memory", "/es/api/frontdesk/archive/doc/a/b", "/es/api/frontdesk/archive/doc/Big", "/es/api/frontdesk/archive/doc/sessions/notes"])
+    expect(apiAllowed("PUT", route)).toBe(false)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/archive")).toBe(false)
+  expect(apiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c")).toBe(false)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/raw")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/usage/openrouter")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/usage/openrouter")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/usage/openrouter/other")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/usage/openrouter")).toBe(false)
+  const response = await get("/es/api/usage/openrouter", { headers: { cookie: "unrelated=private" } })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ method: "GET", path: "/api/usage/openrouter", credentialForwarded: false })
 })
 
 test("the Front desk model and a request's conversation are read-only reads without browser credentials", async () => {

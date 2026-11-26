@@ -45,6 +45,26 @@ export const hostSurfaceAddress = async (host: string, surface: string) => {
   return { src: body.src, expiresAt: body.expires_at }
 }
 
+/** Done (or Undo) for one revision of that host's requested deliverable, in that host's own seen state with that host's
+ * operator session (set up once through that host's own operator flow when missing); true when that host saved it.
+ * Never a local mark, never retried on another host. */
+export const markHostDeliverable = async (host: string, surface: { id: string }, revision: number, seen: boolean) => {
+  const post = (path: string, body: unknown) => fetch(`${hostPrefix(host)}${path}`, {
+    method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: JSON.stringify(body),
+  }).catch(() => undefined)
+  const mark = () => post("/es/api/frontdesk/deliverables/seen", { id: surface.id, revision, seen })
+  const first = await mark()
+  // Only the dashboard's own refusal (JSON) asks for that host's operator session; a listener refusal (plain text) does not.
+  if ((first?.status !== 401 && first?.status !== 403) || !first.headers.get("content-type")?.includes("application/json")) {
+    await first?.body?.cancel()
+    return !!first?.ok
+  }
+  await first.body?.cancel()
+  const session = await post("/es/api/attention/session", {})
+  await session?.body?.cancel()
+  return !!(await mark())?.ok
+}
+
 /** Another host's handoff lineage for the editspace holding `directory` (longest root match): its handoff edges and lane
  * owners, read through the Local listener's read-only routes; undefined when no editspace holds the directory. */
 export const readHostLineage = async (host: string, directory: string) => {

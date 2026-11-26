@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { deskItems } from "./desk"
 import type { HostFeed } from "./host-feed"
-import { needsYou, needsYouFromInputs } from "./needs-you"
+import { needsYou, needsYouFromInputs, staleArtifact } from "./needs-you"
 import { deliverables, type Surface } from "./surfaces"
 import { workCountLabel, workQueue } from "./work-queue"
 
@@ -31,7 +31,7 @@ const items = deskItems({
   title: () => undefined,
   project: () => "opencode",
 })
-const fresh = deliverables([surface("new"), surface("seen", { seen: true }), surface("opened"), surface("board", { purpose: "board" })], new Set(["opened:1"])).fresh
+const fresh = deliverables([surface("new"), surface("seen", { seen: true }), surface("opened"), surface("board", { purpose: "board" })], new Map([["opened:1", true]])).fresh
 
 test("the count is this host's items, other Work hosts' decisions and fresh deliverables, as the sidebar band shows it", () => {
   const feeds = [feed("mini", "Mac Mini", { decisions: [attention("11111111-1111-4111-8111-111111111111")] })]
@@ -57,6 +57,33 @@ test("a host whose decisions are not current keeps its last entries and makes th
   const result = needsYou({ items: [], feeds: [feed("mini", "Mac Mini", { status: "unavailable", decisions: [attention("11111111-1111-4111-8111-111111111111")] }), feed("wing", "Wingman", { decisionsStale: true })], fresh: [] })
   expect([result.count, result.partial, result.behind]).toEqual([1, true, ["Mac Mini", "Wingman"]])
   expect(result.label).toEqual({ text: "1+", title: "Mac Mini, Wingman: not current" })
+})
+
+test("another Work host's fresh deliverables are its own Try entries; Done, boards, Personal and read-only hosts never count", () => {
+  const personal = (id: string, extra = {}) => ({ ...feed(id, id, { surfaces: [surface("theirs")] }), host: { id, label: id, origin: "http://127.0.0.1:3", profile: "personal", ...extra } }) as unknown as HostFeed
+  const feeds = [
+    feed("mini", "Mac Mini", { surfaces: [surface("new", { kind: "path" }), surface("done", { seen: true }), surface("board", { purpose: "board" })] }),
+    personal("excalibur"),
+    personal("ygnium", { readOnly: true }),
+  ]
+  const result = needsYou({ items: [], feeds, fresh })
+  // The same deliverable ID here and on the Mini stays two entries.
+  expect(result.fresh.map((item) => item.id)).toEqual(["new"])
+  expect(result.tries.map((entry) => [entry.key, entry.host, entry.href])).toEqual([["mini~surface:new", "mini", "/?item=mini~surface%3Anew"]])
+  expect(result.tries[0]?.remote).toMatchObject({ kind: "surface", frame: "host", surface: { id: "new", revision: 1 } })
+  expect(result.label).toEqual({ text: "2", title: undefined })
+  expect(result.decisions).toEqual({ text: "0", title: undefined })
+})
+
+test("a host whose Surface list is not current keeps its last Try entries and makes the count partial", () => {
+  const result = needsYou({ items: [], feeds: [feed("mini", "Mac Mini", { surfacesStale: true, surfaces: [surface("new")] })], fresh: [] })
+  expect([result.tries.map((entry) => [entry.key, entry.stale]), result.label]).toEqual([[["mini~surface:new", true]], { text: "1+", title: "Mac Mini: not current" }])
+})
+
+test("the Dock count carries other Work hosts' fresh deliverables like the band", () => {
+  const feeds = [feed("mini", "Mac Mini", { surfaces: [surface("report")] })]
+  expect(needsYouFromInputs(inputs(), feeds)!.label).toEqual(appPath(feeds).label)
+  expect(needsYouFromInputs(inputs(), feeds)!.count).toBe(needsYouFromInputs(inputs(), [])!.count + 1)
 })
 
 test("nothing waiting anywhere is zero only when every host is current", () => {
@@ -103,7 +130,7 @@ const appPath = (feeds: HostFeed[], ignoredSessions = ["ses_ignored"]) => {
     title: () => undefined,
     project: () => undefined,
   })
-  return needsYou({ items: local, feeds, fresh: deliverables(surfaces, new Set()).fresh })
+  return needsYou({ items: local, feeds, fresh: deliverables(surfaces, new Map()).fresh })
 }
 
 test("the dashboard inputs give the app's entries and count: brief jobs out, desk tasks in, ignored out, review in", () => {
@@ -144,4 +171,72 @@ test("a source never read gives no number; a source not current or a stale host 
 
 test("an editspace at the page limit makes the count partial", () => {
   expect(needsYouFromInputs({ ...(inputs() as object), limit: 3 } as never, [])!.label.text).toBe("7+")
+})
+
+const local = (records: unknown[]) => deskItems({ records: records as never, attentionChecked: 1, requests: [], failures: [], failuresChecked: 1, title: () => undefined, project: () => "opencode" })
+
+test("a decision that names a fresh Surface and that Surface are one item, counted once", () => {
+  const board = surface("board-7", { revision: 7 })
+  const result = needsYou({ items: local([attention("a1", { artifact: { title: "Board", surface: "board-7", revision: 7 } })]), feeds: [], fresh: [board], local: [board] })
+  expect(result.entries).toEqual([])
+  expect(result.fresh).toEqual([])
+  expect(result.linked.map((item) => [item.key, item.href, item.decisions.map((record) => record.id), item.fresh])).toEqual([["surface:board-7", "/?item=surface%3Aboard-7", ["a1"], true]])
+  expect(result.count).toBe(1)
+  expect(result.decisions.text).toBe("1")
+})
+
+test("a decision about a Surface already seen still opens with it, as one item", () => {
+  const board = surface("board-7", { revision: 7, seen: true })
+  const result = needsYou({ items: local([attention("a1", { artifact: { title: "Board", surface: "board-7", revision: 7 } })]), feeds: [], fresh: [], local: [board] })
+  expect(result.linked.map((item) => [item.key, item.fresh])).toEqual([["surface:board-7", false]])
+  expect(result.count).toBe(1)
+})
+
+test("without an explicit Surface reference, or with an unlisted one, both rows stay as they are", () => {
+  const board = surface("board-7")
+  const result = needsYou({ items: local([attention("a1", { title: "board-7" }), attention("a2", { artifact: { title: "Gone", surface: "gone", revision: 1 } }), attention("a3", { artifact: { title: "Web", url: "https://x.test/", revision: "1" } })]), feeds: [], fresh: [board], local: [board] })
+  expect(result.entries.map((entry) => entry.key)).toEqual(["attention:opencode:a1", "attention:opencode:a2", "attention:opencode:a3"])
+  expect(result.fresh.map((item) => item.id)).toEqual(["board-7"])
+  expect(result.linked).toEqual([])
+  expect(result.count).toBe(4)
+})
+
+test("several decisions on one Surface are listed inside its one item", () => {
+  const board = surface("board-7", { revision: 7 })
+  const result = needsYou({ items: local([attention("a1", { artifact: { title: "Board", surface: "board-7", revision: 7 } }), attention("a2", { artifact: { title: "Board", surface: "board-7", revision: 6 } })]), feeds: [], fresh: [board], local: [board] })
+  expect(result.linked.map((item) => item.decisions.map((record) => record.id))).toEqual([["a1", "a2"]])
+  expect(result.count).toBe(1)
+})
+
+test("another host's decision links only to that host's Surface and keeps the host in its key", () => {
+  const mine = surface("board-7")
+  const theirs = surface("board-7", { revision: 3 })
+  const feeds = [feed("mini", "Mac Mini", { decisions: [attention("m1", { artifact: { title: "Board", surface: "board-7", revision: 3 } })], surfaces: [theirs] })]
+  const result = needsYou({ items: [], feeds, fresh: [mine], local: [mine] })
+  expect(result.linked.map((item) => [item.key, item.host, item.surface.revision, item.fresh])).toEqual([["mini~surface:board-7", "mini", 3, true]])
+  expect(result.tries).toEqual([])
+  expect(result.fresh.map((item) => item.id)).toEqual(["board-7"])
+  expect(result.count).toBe(2)
+})
+
+test("a closed decision about a fresh Try rides on that Try as its outcome", () => {
+  const board = surface("board-7", { revision: 7 })
+  const answered = attention("a1", { status: "answered", updated_at: 2, artifact: { title: "Board", surface: "board-7", revision: 7 } })
+  const result = needsYou({ items: [], feeds: [], fresh: [board], local: [board], closed: [answered] })
+  expect(result.fresh.map((item) => item.id)).toEqual(["board-7"])
+  expect(result.outcomes.get("surface:board-7")?.id).toBe("a1")
+  expect(result.count).toBe(1)
+})
+
+test("a decision about an older revision says which one", () => {
+  expect(staleArtifact(attention("a1", { artifact: { title: "Board", surface: "b", revision: 5 } }), surface("b", { revision: 7 }))).toBe("decision is about rev 5")
+  expect(staleArtifact(attention("a1", { artifact: { title: "Board", surface: "b", revision: 7 } }), surface("b", { revision: 7 }))).toBeUndefined()
+})
+
+test("an FYI update never enters Needs you; review and respond updates do", async () => {
+  const { asksSomething } = await import("./needs-you")
+  expect(asksSomething({})).toBe(true)
+  expect(asksSomething({ change: { base: 1, intent: "fyi", look: [], respond: null } })).toBe(false)
+  expect(asksSomething({ change: { base: 1, intent: "review", look: [], respond: null } })).toBe(true)
+  expect(asksSomething({ change: { base: 1, intent: null, look: [], respond: "Which?" } })).toBe(true)
 })

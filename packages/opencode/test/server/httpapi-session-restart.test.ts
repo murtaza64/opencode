@@ -512,7 +512,7 @@ it.live(
   90_000,
 )
 
-const recover = (dir: string, sessionID: string, body: { recoveryID: string; anchorMessageID: string; text?: string }) =>
+const recover = (dir: string, sessionID: string, body: { recoveryID: string; anchorMessageID: string; text?: string; run?: boolean }) =>
   requestInDirectory(`/session/${sessionID}/recover`, dir, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -627,4 +627,387 @@ it.live(
       { config: testProviderConfig },
     ),
   60_000,
+)
+
+it.live(
+  "recover run:false closes the interrupted step and turn once, runs nothing and leaves queued input pending",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("must not be requested")
+          const session = yield* Session.use.create({ title: "Close only" })
+          const seeded = yield* seedInterrupted(session, dir)
+          const started = yield* Session.Service.use((sessions) => sessions.turnStarted(session.id))
+          // Input queued while the step was unfinished: an advisory wake never promotes it.
+          const queued = yield* requestInDirectory(`/session/${session.id}/input`, dir, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ requestID: "queued-1", delivery: "queue", text: "after you recover" }),
+          }).pipe(Effect.flatMap((response) => response.json))
+          expect(queued).toMatchObject({ state: "pending" })
+          const before = (yield* messages(dir, session.id)).length
+
+          const result = yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id, run: false })
+          expect(result).toMatchObject({ outcome: "closed", abandonedTools: 1, marker: { reason: "operator-recovery", interruptedTools: 1, closed: true } })
+
+          const history = yield* messages(dir, session.id)
+          expect(history).toHaveLength(before)
+          const anchor = history.find((message) => message.info.id === seeded.assistant.id)!
+          expect(anchor.info.role === "assistant" && anchor.info.error?.name).toBe("MessageAbortedError")
+          expect(anchor.info.role === "assistant" && anchor.info.time.completed).toBeGreaterThan(0)
+          const cut = anchor.parts.find((part) => part.type === "tool" && part.callID === "call_cut")!
+          expect(cut.type === "tool" && cut.state.status === "error" && cut.state.error).toContain("effect is unknown and was not repeated")
+          expect(history.some((message) => message.info.role === "user" && "source" in message.info && message.info.source?.kind === "recovery")).toBe(false)
+          const info = (yield* requestInDirectory(`/session/${session.id}`, dir).pipe(Effect.flatMap((r) => r.json))) as Session.Info
+          expect(info.time.turn?.started).toBe(started)
+          expect(info.time.turn?.ended).toBeGreaterThanOrEqual(started)
+          const receipt = yield* requestInDirectory(`/session/${session.id}/input/queued-1`, dir).pipe(Effect.flatMap((r) => r.json))
+          expect(receipt).toMatchObject({ state: "pending" })
+
+          // Exactly once: the same request is a duplicate; the other mode with this ID is refused.
+          expect(yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "duplicate", marker: result.marker })
+          expect(yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id })).toMatchObject({ outcome: "conflict" })
+          const after = yield* messages(dir, session.id)
+          expect(after.find((m) => m.info.id === seeded.assistant.id)?.info).toEqual(anchor.info)
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "after recover run:false, the next queued input wakes the session and every waiting input is answered",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          // A human queued input runs alone at an idle boundary, so the two waiting inputs take two turns.
+          yield* llm.text("answered the earlier input")
+          yield* llm.text("new work after the close")
+          const session = yield* Session.use.create({ title: "Close then new work" })
+          const seeded = yield* seedInterrupted(session, dir)
+          const queue = (requestID: string, text: string) =>
+            requestInDirectory(`/session/${session.id}/input`, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ requestID, delivery: "queue", text }),
+            }).pipe(Effect.flatMap((response) => response.json))
+          expect(yield* queue("before-close", "waiting since the crash")).toMatchObject({ state: "pending" })
+          expect((yield* recover(dir, session.id, { recoveryID: "close-w", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("closed")
+          expect(yield* llm.calls).toBe(0)
+
+          // The closed step is settled, so new owner work must not stay stuck behind it.
+          yield* queue("after-close", "follow-up from the owner")
+          const history = yield* idleWithReply(dir, session.id, "new work after the close")
+          const texts = history.flatMap((message) =>
+            message.info.role === "user" ? message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],
+          )
+          expect(texts).toContain("waiting since the crash")
+          expect(texts).toContain("follow-up from the owner")
+          expect(yield* toolRuns(dir)).toBe("x")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a recovery ID used to run cannot later close, and a finished session is refused by run:false without writing",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("recovered by operator intent")
+          const session = yield* Session.use.create({ title: "Run then close" })
+          const seeded = yield* seedInterrupted(session, dir)
+          expect((yield* recover(dir, session.id, { recoveryID: "run-1", anchorMessageID: seeded.assistant.id })).outcome).toBe("scheduled")
+          yield* idleWithReply(dir, session.id, "recovered by operator intent")
+          const before = yield* messages(dir, session.id)
+          expect(yield* recover(dir, session.id, { recoveryID: "run-1", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "conflict" })
+          expect((yield* recover(dir, session.id, { recoveryID: "close-2", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("advanced")
+          expect(yield* messages(dir, session.id)).toEqual(before)
+          expect(yield* llm.calls).toBe(1)
+
+          const done = yield* Session.use.create({ title: "Done" })
+          const finished = yield* seedInterrupted(done, dir, { tools: false, finish: "stop", completedAt: Date.now() })
+          expect((yield* recover(dir, done.id, { recoveryID: "close-3", anchorMessageID: finished.assistant.id, run: false })).outcome).toBe("complete")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a repeated close settles a turn that a crash left open after the marker was written",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const session = yield* Session.use.create({ title: "Close retry" })
+          const seeded = yield* seedInterrupted(session, dir)
+          expect((yield* recover(dir, session.id, { recoveryID: "close-r", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("closed")
+          // Simulate a crash after the marker: a turn is open again with no end.
+          const started = yield* Session.Service.use((sessions) => sessions.turnStarted(session.id))
+          expect(yield* recover(dir, session.id, { recoveryID: "close-r", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "duplicate" })
+          const info = (yield* requestInDirectory(`/session/${session.id}`, dir).pipe(Effect.flatMap((r) => r.json))) as Session.Info
+          expect(info.time.turn).toMatchObject({ started })
+          expect(info.time.turn?.ended).toBeGreaterThanOrEqual(started)
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+// A lost server process (OOM, crash) leaves the newest step open with no runner and no restart manifest.
+// Rows the lost process wrote: all recorded activity predates this server process.
+const before = () => Date.now() - 10 * 60_000
+
+const queueMail = (dir: string, sessionID: string, requestID: string, text: string) =>
+  requestInDirectory(`/session/${sessionID}/input`, dir, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requestID, delivery: "queue", text, source: { type: "editspace-mail", id: requestID, sender: "owner", recipient: "worker" } }),
+  }).pipe(Effect.flatMap((response) => response.json))
+
+it.live(
+  "after a lost process, a step whose tools all completed lets the waiting input start the next turn once, never re-running the tool",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("continued after the crash")
+          const session = yield* Session.use.create({ title: "Orphan durable" })
+          const seeded = yield* seedInterrupted(session, dir, { tools: "completed", text: "checking", at: before() })
+          expect(yield* queueMail(dir, session.id, "resume-1", "resume your task")).toMatchObject({ state: "pending" })
+          const history = yield* idleWithReply(dir, session.id, "continued after the crash")
+          const promoted = history.find((message) => message.info.role === "user" && message.parts.some((part) => part.type === "text" && part.text === "resume your task"))
+          expect(promoted).toBeDefined()
+          // The open step is kept as it was: same id, its completed tool untouched and not re-run.
+          const anchor = history.find((message) => message.info.id === seeded.assistant.id)!
+          expect(anchor.parts.filter((part) => part.type === "tool").map((part) => part.type === "tool" && part.state.status)).toEqual(["completed"])
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.calls).toBe(1)
+          // The receipt keeps its request ID and links the user message it became.
+          const receipt = (yield* requestInDirectory(`/session/${session.id}/input/resume-1`, dir).pipe(Effect.flatMap((r) => r.json))) as { state: string; messageID?: string }
+          expect(receipt.state).not.toBe("pending")
+          expect(receipt.messageID).toBe(promoted!.info.id)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "after a lost process, an empty open step lets the waiting input start the next turn",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("answered after an empty step")
+          const session = yield* Session.use.create({ title: "Orphan empty" })
+          yield* seedInterrupted(session, dir, { tools: false, at: before() })
+          yield* queueMail(dir, session.id, "resume-2", "go on")
+          yield* idleWithReply(dir, session.id, "answered after an empty step")
+          expect(yield* llm.calls).toBe(1)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "after a lost process, unknown effects, explicit stops and provider failures keep the waiting input pending",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("must not be requested")
+          const cases = [
+            { title: "running tool", options: { tools: "mixed" as const, at: before() } },
+            { title: "interrupted tool", options: { tools: "cancelled" as const, at: before() } },
+            { title: "stopped", options: { tools: "completed" as const, at: before(), error: { name: "MessageAbortedError", data: { message: "stopped" } } as never } },
+            // Opened after this process started: possibly still streaming in a live runner, never an orphan.
+            { title: "fresh open text step", options: { tools: false as const, text: "streaming" } },
+            { title: "provider failure", options: { tools: false as const, at: before(), error: { name: "APIError", data: { message: "boom", isRetryable: false } } as never } },
+          ]
+          const sessions = []
+          for (const item of cases) {
+            const session = yield* Session.use.create({ title: item.title })
+            yield* seedInterrupted(session, dir, item.options)
+            expect(yield* queueMail(dir, session.id, `hold-${sessions.length}`, "resume")).toMatchObject({ state: "pending" })
+            sessions.push(session.id)
+          }
+          yield* Effect.sleep("3 seconds")
+          for (const [index, sessionID] of sessions.entries()) {
+            const receipt = yield* requestInDirectory(`/session/${sessionID}/input/hold-${index}`, dir).pipe(Effect.flatMap((r) => r.json))
+            expect({ case: cases[index]!.title, state: (receipt as { state: string }).state }).toEqual({ case: cases[index]!.title, state: "pending" })
+          }
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+// Shapes recorded on a real Linux OOM (Personal, 2026-11-05; metadata only): "native" ended its step with
+// finish tool-calls after a completed bash; "core" had a completed-tool step and then an empty step with no parts.
+it.live(
+  "after a lost process, the recorded OOM shapes (completed tool-calls step; empty follow-up step) let waiting input continue",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("native continued")
+          yield* llm.text("core continued")
+          const native = yield* Session.use.create({ title: "native shape" })
+          yield* seedInterrupted(native, dir, { tools: "completed", finish: "tool-calls", at: before(), completedAt: before() })
+          const core = yield* Session.use.create({ title: "core shape" })
+          const at = before()
+          const seeded = yield* seedInterrupted(core, dir, { tools: "completed", finish: "tool-calls", at, completedAt: at })
+          yield* Session.Service.use((sessions) =>
+            sessions.updateMessage({ ...seeded.assistant, id: MessageID.ascending(), time: { created: at + 1 }, finish: undefined }),
+          )
+          yield* queueMail(dir, native.id, "native-1", "resume")
+          yield* idleWithReply(dir, native.id, "native continued")
+          yield* queueMail(dir, core.id, "core-1", "resume")
+          yield* idleWithReply(dir, core.id, "core continued")
+          expect(yield* llm.calls).toBe(2)
+          expect(yield* toolRuns(dir)).toBe("x")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+const incidentFiles = (restartDir: string) =>
+  Effect.promise(async () => {
+    const { readdir, readFile } = await import("fs/promises")
+    const names = (await readdir(restartDir).catch(() => [] as string[])).filter((name) => name.endsWith(".incident-source.json"))
+    return Promise.all(names.map(async (name) => ({ name, body: JSON.parse(await readFile(path.join(restartDir, name), "utf8")) })))
+  })
+
+const withRestartDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.OC_RESTART_DIR
+      process.env.OC_RESTART_DIR = path.join(dir, "restarts")
+      return previous
+    }),
+    () => effect,
+    (previous) => Effect.sync(() => {
+      if (previous === undefined) delete process.env.OC_RESTART_DIR
+      else process.env.OC_RESTART_DIR = previous
+    }),
+  )
+
+it.live(
+  "a held orphan records one crash-observed incident source per session, write-once, and never for a durable orphan",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("durable continued")
+            const held = yield* Session.use.create({ title: "held" })
+            const heldStep = yield* seedInterrupted(held, dir, { tools: "mixed", at: before() })
+            const second = yield* Session.use.create({ title: "held 2" })
+            yield* seedInterrupted(second, dir, { tools: "cancelled", at: before() })
+            const stopped = yield* Session.use.create({ title: "stopped" })
+            yield* seedInterrupted(stopped, dir, { tools: false, at: before(), error: { name: "MessageAbortedError", data: { message: "stopped" } } as never })
+            const durable = yield* Session.use.create({ title: "durable" })
+            yield* seedInterrupted(durable, dir, { tools: "completed", at: before() })
+
+            yield* queueMail(dir, held.id, "h-1", "resume")
+            yield* queueMail(dir, second.id, "h-2", "resume")
+            yield* queueMail(dir, stopped.id, "s-1", "resume")
+            yield* queueMail(dir, durable.id, "d-1", "resume")
+            yield* idleWithReply(dir, durable.id, "durable continued")
+            // A second refusal in the same process generation adds nothing.
+            yield* queueMail(dir, held.id, "h-3", "again")
+            const files = yield* pollWithTimeout(
+              incidentFiles(path.join(dir, "restarts")).pipe(Effect.map((list) => (list.length >= 3 ? list : undefined))),
+              "incident sources were not written",
+            )
+            yield* Effect.sleep("1 second")
+            const final = yield* incidentFiles(path.join(dir, "restarts"))
+            expect(final).toHaveLength(3)
+            const bySession = Object.fromEntries(final.map((file) => [file.body.session.session, file.body]))
+            expect(Object.keys(bySession).sort()).toEqual([held.id, second.id, stopped.id].sort())
+            expect(bySession[stopped.id].session.reason).toBe("explicit-stop")
+            // Names follow the dispatcher's crash-<generation>-<session>.incident-source.json and files are private.
+            for (const file of final) {
+              expect(file.name).toMatch(/^crash-\d{1,16}-\d{1,10}-ses_[A-Za-z0-9]{1,64}\.incident-source\.json$/)
+              const { statSync } = yield* Effect.promise(() => import("fs"))
+              expect(statSync(path.join(dir, "restarts", file.name)).mode & 0o777).toBe(0o600)
+            }
+            const body = bySession[held.id]
+            expect(body).toMatchObject({ kind: "crash-observed", version: 1, source: "core-wake-guard", previous_generation: null, core_binary_sha256: null })
+            expect(body.session).toMatchObject({ anchor: heldStep.assistant.id, reason: "unknown-effect", fenced: false, lane: null, recorded_owner: null })
+            expect(body.session.tools).toEqual([{ tool: "bash", status: "completed" }, { tool: "bash", status: "running" }])
+            expect(body.session.pending_inputs).toBeGreaterThanOrEqual(1)
+            expect(JSON.stringify(body)).not.toContain("sleep 600")
+            expect("capturedAt" in body || "manifest" in body).toBe(false)
+            expect(files.every((file) => file.name.startsWith(`crash-${body.generation}-`))).toBe(true)
+            // The held sessions still hold: their inputs stay pending and no provider call ran for them.
+            expect(yield* llm.calls).toBe(1)
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a fresh open step newer than this process is not a crash orphan and records nothing",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("must not be requested")
+            const session = yield* Session.use.create({ title: "fresh" })
+            yield* seedInterrupted(session, dir, { tools: "mixed" })
+            yield* queueMail(dir, session.id, "f-1", "resume")
+            yield* Effect.sleep("2 seconds")
+            expect(yield* incidentFiles(path.join(dir, "restarts"))).toEqual([])
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a prompt promoted before a lost process opened its step holds and records the prompt as the anchor",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("must not be requested")
+            const session = yield* Session.use.create({ title: "no step" })
+            const user: SessionV1.User = { id: MessageID.ascending(), sessionID: session.id, role: "user", agent: "build", time: { created: before() }, model }
+            yield* Session.Service.use((sessions) => sessions.updateMessage(user))
+            yield* Session.Service.use((sessions) => sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: user.id, type: "text", text: "do the work" }))
+            yield* queueMail(dir, session.id, "n-1", "resume")
+            const files = yield* pollWithTimeout(
+              incidentFiles(path.join(dir, "restarts")).pipe(Effect.map((list) => (list.length ? list : undefined))),
+              "incident source was not written",
+            )
+            expect(files).toHaveLength(1)
+            expect(files[0]!.body.session).toMatchObject({ session: session.id, anchor: user.id, reason: "unknown-effect", tools: [] })
+            expect(yield* requestInDirectory(`/session/${session.id}/input/n-1`, dir).pipe(Effect.flatMap((r) => r.json))).toMatchObject({ state: "pending" })
+            expect(yield* llm.calls).toBe(0)
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
 )

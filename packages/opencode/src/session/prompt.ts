@@ -54,6 +54,7 @@ import { Runner } from "@/effect/runner"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { SessionSupersession } from "./supersession"
+import { SessionCrashIncident } from "./crash-incident"
 import { SessionInput } from "./input"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -108,6 +109,40 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
   return part.state.status === "error" && part.state.metadata?.interrupted === true
+}
+
+// When this server process started. Recorded activity older than this cannot belong to a runner in this process.
+const processStarted = Date.now()
+
+/**
+ * The newest step answering the newest prompt was left open by a lost server process and every effect on it is
+ * durable, so a waiting input may start the next turn. The open step itself is never re-run.
+ *
+ * Lost process: every recorded time on the step (created, completed, part and tool times) predates this process,
+ * so no runner here owns it. Another live server sharing the database could still own a step it opened before this
+ * one started; local Session execution is process-local and does not support that.
+ * Durable: no error (explicit stop, provider failure) or restart marker, not a compaction summary, and each tool call
+ * completed (or none). Pending, running, interrupted and failed tool calls keep holding for explicit recovery, so the
+ * advisory wake still never resumes unknown effects.
+ */
+function orphanedDurableStep(
+  user: SessionV1.User | undefined,
+  assistant: SessionV1.Assistant | undefined,
+  parts: readonly SessionV1.Part[],
+) {
+  if (!user || !assistant || assistant.parentID !== user.id) return false
+  // A restart marker means explicit recovery already decided this step (uncertain, scheduled or closed).
+  if (assistant.error || assistant.restarts?.length || assistant.summary) return false
+  if (!parts.every((part) => part.type !== "tool" || part.state.status === "completed")) return false
+  const times = [
+    assistant.time.created,
+    assistant.time.completed,
+    ...parts.flatMap((part) => {
+      const time = part.type === "tool" ? (part.state as { time?: { start?: number; end?: number } }).time : (part as { time?: { start?: number; end?: number } }).time
+      return [time?.start, time?.end]
+    }),
+  ].filter((value): value is number => typeof value === "number")
+  return times.every((time) => time < processStarted)
 }
 
 export interface Interface {
@@ -171,6 +206,7 @@ const layer = Layer.effect(
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
     const inputs = yield* SessionInput.Service
+    const supersession = yield* SessionSupersession.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -1169,8 +1205,13 @@ const layer = Layer.effect(
         let started = false
         let boundary = true
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        // The finish tree of the step that ran in the previous iteration, if that iteration was a model step. Only an
+        // immediately following model step may start from it; any other iteration clears it.
+        let finishedTree: string | undefined
 
         while (true) {
+          const base = finishedTree
+          finishedTree = undefined
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
@@ -1307,6 +1348,7 @@ const layer = Layer.effect(
               assistantMessage: msg,
               sessionID,
               model,
+              base,
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
           const snapshotEnd = performance.now()
@@ -1407,6 +1449,7 @@ const layer = Layer.effect(
               inputs.presented(sessionID, mail),
             )
 
+            finishedTree = handle.finished()
             if (result === "stop") return "break" as const
             const finished = handle.message.finish && !["tool-calls", "unknown"].includes(handle.message.finish)
             if (finished && !handle.message.error) {
@@ -1480,9 +1523,39 @@ const layer = Layer.effect(
           )
           const latest = MessageV2.latest(history)
           const assistant = history.findLast((m) => m.info.id === latest.assistant?.id)
-          // An advisory wake never resumes uncertain work left by a crash, abort, or error.
-          if (latest.user && !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? []))
+          // An advisory wake never resumes uncertain work left by a crash, abort, or error. A history holding only
+          // no-reply notes has no turn to resume: notes are never answered, so waiting input may start one.
+          const notesOnly = latest.user?.noReply === true && !latest.assistant
+          // An operator close-only recovery (`recover` with run:false) settled that step on purpose; waiting input
+          // starts the next turn instead of staying behind it.
+          const closedByOperator = latest.assistant?.restarts?.at(-1)?.closed === true
+          if (
+            latest.user &&
+            !notesOnly &&
+            !closedByOperator &&
+            !orphanedDurableStep(latest.user, latest.assistant, assistant?.parts ?? []) &&
+            !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])
+          ) {
+            // A held orphan left by a lost process: record it once for its owner. The step still holds here.
+            const reason = SessionCrashIncident.seen(sessionID)
+              ? undefined
+              : SessionCrashIncident.classify(latest.user, latest.assistant, assistant?.parts ?? [], processStarted)
+            const answering = latest.assistant?.parentID === latest.user.id ? latest.assistant : undefined
+            if (reason) {
+              const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+              yield* SessionCrashIncident.record({
+                started: processStarted,
+                sessionID,
+                directory: session.directory,
+                anchor: answering ?? latest.user,
+                parts: answering ? (assistant?.parts ?? []) : [],
+                reason,
+                pendingInputs: (yield* inputs.list(sessionID, { state: "pending", limit: 50 })).items.length,
+                fenced: (yield* supersession.get(sessionID)) !== undefined,
+              })
+            }
             return
+          }
           if (!(yield* inputs.promote(sessionID, true))) return
           return yield* runLoop(sessionID)
         }),
@@ -1648,7 +1721,10 @@ const layer = Layer.effect(
         const marker = (yield* restartAnchor(input.sessionID, input.anchorMessageID))?.info.restarts?.find(
           (item) => item.restartID === input.recoveryID,
         )
-        return marker ? { outcome: "duplicate" as const, marker } : undefined
+        if (!marker) return undefined
+        // The recovery ID already decided one mode; the other mode gets nothing written or run.
+        if ((marker.closed === true) !== (input.run === false)) return { outcome: "conflict" as const, marker }
+        return { outcome: "duplicate" as const, marker }
       })
       const evaluate = Effect.gen(function* () {
         if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
@@ -1680,6 +1756,39 @@ const layer = Layer.effect(
         return { go: { decision, now } }
       }).pipe(Effect.map((value): { stop?: SessionRestart.RecoverResult; go?: { decision: Extract<SessionRestart.RecoverDecision, { outcome: "scheduled" }>; now: number } } =>
         "go" in value || "stop" in value ? value : { stop: value as SessionRestart.RecoverResult }))
+      if (input.run === false) {
+        // Close only: under the Session's run lock, re-check freshness, write the same abandoned results and
+        // closed step as a recovery, settle the open turn, and start nothing.
+        const closed = yield* state
+          .admitIdle(input.sessionID, (idle) =>
+            Effect.gen(function* () {
+              const settleTurn = Effect.gen(function* () {
+                const turn = (yield* sessions.get(input.sessionID).pipe(Effect.orDie)).time.turn
+                if (turn?.started !== undefined && turn.ended === undefined) yield* sessions.turnEnded(input.sessionID, turn.started)
+              })
+              const repeated = yield* duplicate
+              // The close is several writes; a retry after a crash between the marker and the turn end finishes it.
+              if (repeated?.outcome === "duplicate" && idle) yield* settleTurn
+              if (repeated) return repeated
+              if (!idle) return { outcome: "running" as const }
+              const evaluated = yield* evaluate
+              if (evaluated.stop) return evaluated.stop
+              const current = evaluated.go!
+              const rows = SessionRestart.settleRecovery(current.decision, input, current.now)
+              for (const part of rows.parts) yield* sessions.updatePart(part)
+              yield* sessions.updateMessage(rows.anchor)
+              for (const info of rows.trailing) yield* sessions.updateMessage(info)
+              yield* settleTurn
+              return {
+                outcome: "closed" as const,
+                marker: current.decision.marker,
+                abandonedTools: current.decision.abandoned.length,
+              } satisfies SessionRestart.RecoverResult
+            }),
+          )
+          .pipe(Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })))
+        return closed
+      }
       const requestID = `recovery-${input.recoveryID}`
       // Admission takes the Session's run lock, so it happens before the locked guard. While the step is
       // unfinished an advisory wake never promotes it; the guard re-checks and withdraws it if declined.
@@ -2165,6 +2274,7 @@ export const node = LayerNode.make({
     Instruction.node,
     SessionRunState.node,
     SessionInput.node,
+    SessionSupersession.node,
     SessionRevert.node,
     SessionSummary.node,
     SystemPrompt.node,

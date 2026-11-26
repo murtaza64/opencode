@@ -117,3 +117,52 @@
 /* On the card's type scale: request text and its headings at 13px, code at 12px like a brief's mono values. */
 .home-request-text [data-component="markdown"] :is(h1, h2, h3, h4, h5, h6) { font-size: 13px; }
 .home-request-text [data-component="markdown"] :is(code, pre, .shiki) { font-size: 12px; }
+/* A recommendation selected as a draft says so in words; the note waits behind one quiet text button. */
+.home-preselected { margin: 6px 0 0; font-size: 11px; color: var(--subtext0); }
+.attention-home button.home-add-note, button.home-add-note { justify-self: start; inline-size: max-content; margin-block: 6px 2px; padding: 2px 0; font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Decision card, desktop phase 1 (DD #517, decision-brief rev 3): eyebrow state and host pills, one-line option rows
+ * with the recommendation tagged at the row's end, and one quiet row for the card's secondary actions. */
+.home-decision .home-eyebrow { align-items: center; }
+.decision-state { margin-inline-start: auto; padding: 0 7px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--peach); background: color-mix(in srgb, var(--peach) 14%, transparent); }
+.decision-state[data-kind=blocker][data-s=open] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.decision-state:is([data-s=answered], [data-s=decided]) { color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.decision-state[data-s=resolved] { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.decision-state:is([data-s=withdrawn], [data-s=snoozed]) { color: var(--subtext0); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.decision-host { padding: 0 5px; border: 1px solid var(--surface1); border-radius: 3px; font-size: 10px; line-height: 14px; color: var(--subtext1); }
+.home-decision fieldset.home-options:not(.home-option-cards) { display: grid; gap: 4px; inline-size: 100%; }
+.home-decision fieldset.home-options:not(.home-option-cards) > label { display: flex; align-items: center; gap: 10px; min-block-size: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); font-size: 13px; }
+.home-decision fieldset.home-options:not(.home-option-cards) > label:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.home-decision fieldset.home-options:not(.home-option-cards) > label[data-checked] { border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
+.home-decision fieldset.home-options:not(.home-option-cards) > label[data-focus-visible] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-decision fieldset.home-options:not(.home-option-cards) .home-option-body { flex: 1; flex-direction: row; align-items: center; gap: 8px; }
+.decision-rec { margin-inline-start: auto; padding: 0 6px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); flex: none; }
+.home-decision-more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-block-start: 8px; }
+.home-decision-more > details { margin-block-start: 0; }
+.home-decision-more > details[open] { flex-basis: 100%; }
+.home-decision-more button { border-color: transparent; color: var(--subtext0); padding-inline: 6px; font-size: 12px; }
+.home-decision-more button:hover { color: var(--text); }
+/* A plain either/or answered by clicking the option itself (simple-decision-direct-buttons-20261103). */
+.decision-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.attention-home .decision-button { min-block-size: 36px; min-inline-size: 88px; padding: 0 16px; border-radius: 6px; font-size: 13px; }
+.attention-home .decision-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.attention-home .decision-button[aria-busy=true] { color: var(--subtext1); }
+.decision-sending { font-size: 11px; }
+@media (pointer: coarse), (max-width: 650px) { .attention-home .decision-button { min-block-size: 44px; flex: 1 1 auto; } }
+/* An input option stays labelled while its field is open; the chevron and pressed fill say it is expanded. */
+.attention-home .decision-button[aria-expanded=true] { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--subtext0); }
+.decision-chevron { display: inline-block; flex: none; inline-size: 10px; block-size: 10px; margin-inline-start: 8px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s ease; }
+.decision-button[aria-expanded=true] .decision-chevron { transform: rotate(180deg); }
+.decision-field-open { margin-block: 4px 8px; }
+.decision-field-row { display: flex; align-items: end; gap: 8px; }
+.decision-field-row > .home-input { flex: 1; min-inline-size: 0; }
+.decision-field-row > .home-input > label, .home-secret-inline .home-secret-field > span { font-size: 12px; color: var(--subtext0); }
+.decision-field-send { box-sizing: border-box; flex: none; block-size: 40px; min-block-size: 0; margin: 0; }
+.attention-home fieldset.home-secret-inline { margin: 0; padding: 0; border: 0; display: grid; gap: 6px; max-inline-size: 560px; }
+.home-secret-row { display: flex; align-items: end; gap: 8px; }
+.home-secret-fields { flex: 1; min-inline-size: 0; max-inline-size: 360px; display: grid; gap: 8px; }
+.home-secret-inline .home-secret-field { display: grid; gap: 6px; }
+.home-secret-inline .home-secret-field input { box-sizing: border-box; inline-size: 100%; block-size: 40px; min-block-size: 0; padding-block: 0; margin: 0; }
+.home-secret-inline .home-secret-field input:focus-visible, .home-secret-inline .home-secret-field input:focus { outline-offset: 0; }
+.home-secret-row > .home-primary { box-sizing: border-box; flex: none; block-size: 40px; min-block-size: 0; margin: 0; }
+.home-secret-inline .home-secret-note { margin: 0; font-size: 12px; color: var(--overlay1); }

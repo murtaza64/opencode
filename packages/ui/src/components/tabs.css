@@ -98,7 +98,7 @@
       outline: none;
       box-shadow: none;
     }
-    &:has([data-selected]) {
+    &[data-trigger-selected] {
       color: var(--text-strong);
       background-color: transparent;
       border-bottom-color: transparent;
@@ -110,7 +110,7 @@
     &:hover:not(:disabled):not([data-selected]) {
       color: var(--text-strong);
     }
-    &:has([data-slot="tabs-trigger-close-button"]) {
+    &[data-closable] {
       padding-inline-end: 12px;
 
       [data-slot="tabs-trigger"] {
@@ -216,14 +216,14 @@
         padding: 0 !important;
       }
 
-      &:has([data-slot="tabs-trigger-close-button"]) {
+      &[data-closable] {
         padding-inline-end: 5px;
         [data-slot="tabs-trigger"] {
           padding-inline-end: 0 !important;
         }
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         color: var(--text-strong);
         background-color: var(--surface-base-active);
         border-color: var(--border-weak-base);
@@ -234,7 +234,7 @@
         }
       }
 
-      &:hover:not(:disabled):not(:has([data-selected])) {
+      &:hover:not(:disabled):not([data-trigger-selected]) {
         color: var(--text-base);
         background-color: var(--surface-base-hover);
       }
@@ -294,11 +294,11 @@
         padding: 0 !important;
       }
 
-      &:has([data-slot="tabs-trigger-close-button"]) {
+      &[data-closable] {
         padding-inline-end: 8px;
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         background-color: var(--v2-background-bg-layer-01);
         box-shadow: inset 0 0 0 0.5px var(--v2-border-border-muted);
       }
@@ -371,7 +371,7 @@
         margin: 0;
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         color: var(--text-strong);
         background-color: transparent;
         border-bottom-color: var(--icon-strong-base);
@@ -381,7 +381,7 @@
         color: var(--text-strong);
       }
 
-      &:has([data-slot="tabs-trigger-close-button"]) {
+      &[data-closable] {
         padding-inline-end: 0;
         [data-slot="tabs-trigger"] {
           padding-inline-end: 0;
@@ -438,7 +438,7 @@
         background-color: var(--surface-base-active);
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         background-color: var(--surface-base-active);
         color: var(--text-strong);
 
@@ -471,11 +471,11 @@
         background-color 120ms ease,
         border-color 120ms ease;
 
-      &:not(:has([data-selected])):hover:not(:disabled) {
+      &:not([data-trigger-selected]):hover:not(:disabled) {
         color: var(--text-base);
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         color: var(--text-strong);
         border-color: var(--border-weak-base);
       }
@@ -519,7 +519,7 @@
         background-color: var(--surface-base-hover);
       }
 
-      &:has([data-selected]) {
+      &[data-trigger-selected] {
         background-color: var(--surface-base-active);
         color: var(--text-strong);
       }
@@ -557,7 +557,7 @@
           background-color: var(--surface-base-hover);
         }
 
-        &:has([data-selected]) {
+        &[data-trigger-selected] {
           background-color: var(--surface-base-hover);
           color: var(--text-strong);
         }
@@ -621,12 +621,12 @@
           background-color: var(--surface-base-hover);
         }
 
-        &:has([data-slot="tabs-trigger"]:focus-visible) {
+        &[data-trigger-focus-visible] {
           background-color: var(--surface-base-hover);
           box-shadow: var(--shadow-xs-border-focus);
         }
 
-        &:has([data-selected]) {
+        &[data-trigger-selected] {
           background-color: var(--surface-base-active);
           color: var(--text-strong);
 
@@ -731,7 +731,7 @@ body[data-new-layout] #review-panel [data-component="tabs"][data-variant="normal
       padding: 0 !important;
     }
 
-    &:has([data-slot="tabs-trigger-close-button"]) {
+    &[data-closable] {
       padding-inline-end: 8px;
 
       [data-slot="tabs-trigger-close-button"] {
@@ -739,7 +739,7 @@ body[data-new-layout] #review-panel [data-component="tabs"][data-variant="normal
       }
     }
 
-    &:has([data-selected]) {
+    &[data-trigger-selected] {
       background-color: var(--v2-background-bg-layer-02);
       box-shadow: none;
     }

@@ -70,12 +70,12 @@ await page.route(`${mini}/**`, (route) => {
 })
 try {
   await page.goto(preview.url)
-  const rows = page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item")
+  const rows = page.locator(".sidebar [role=tabpanel] .session-entry .nav-item")
   // Both copies of ses_a are listed, each on its host; the Mini's other project is not in this project's view.
   await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible()
   await expect(page.getByRole("link", { name: /^Mini only, on Mac Mini$/ })).toBeVisible()
   await expect(page.locator(".sidebar .nav-item", { hasText: "Mini other project" })).toHaveCount(0)
-  await expect(page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item[data-host-key='mini:ses_a']")).toHaveCount(1)
+  await expect(page.locator(".sidebar [role=tabpanel] .session-entry .nav-item[data-host-key='mini:ses_a']")).toHaveCount(1)
   await expect(rows.filter({ hasText: "Composer fixture" })).toHaveCount(1)
   await expect(rows.filter({ hasText: "Composer fixture" }).locator(".sr-only")).toHaveText(", on Local")
   await expect(page.locator(".host-glyph").first()).toBeVisible()
@@ -145,11 +145,11 @@ try {
   await expect(page.locator(".work-remote")).toHaveAttribute("data-work-key", "mini~attention:fixture:11111111-1111-4111-8111-111111111111")
   await expect(page).toHaveURL(/item=mini(~|%7E)attention/)
   expect(opened.length).toBe(openedBefore)
-  // With the Mini away its decisions are not shown as none: the count is marked incomplete and names it.
+  // With the Mini away its decisions are not shown as none: the count is withheld and names the hosts behind it.
   miniDown = true
   await page.goto(new URL("/desk", preview.url).href)
   await expect(needsCount(page)).toHaveAttribute("title", /Mac Mini.*Wingman|Wingman.*Mac Mini/)
-  await expect(needsCount(page)).toHaveText(/\+$/)
+  await expect(needsCount(page)).toHaveText("")
   miniDown = false
   await page.goto(preview.url)
   // Opening a Mini row opens it here in the normal session view, read through /hosts/mini (#261; writes are

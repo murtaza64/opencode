@@ -1,5 +1,5 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref, Stream } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
@@ -7,6 +7,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Global } from "@opencode-ai/core/global"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { EventV2 } from "@opencode-ai/core/event"
 import { it } from "./lib/effect"
 import { readFile, rm, writeFile, utimes, mkdir } from "fs/promises"
 import path from "path"
@@ -93,6 +94,14 @@ const buildLayer = (state: Ref.Ref<MockState>) =>
   // every test would reuse the cachedInvalidateWithTTL state from the first run.
   Layer.fresh(
     AppNodeBuilder.build(ModelsDev.node, [
+      [LayerNodePlatform.httpClient, Layer.succeed(HttpClient.HttpClient, makeMockClient(state))],
+    ]),
+  )
+
+// Refreshed is observed on the same EventV2 instance ModelsDev publishes to.
+const buildWithEvents = (state: Ref.Ref<MockState>) =>
+  Layer.fresh(
+    AppNodeBuilder.build(LayerNode.group([ModelsDev.node, EventV2.node]), [
       [LayerNodePlatform.httpClient, Layer.succeed(HttpClient.HttpClient, makeMockClient(state))],
     ]),
   )
@@ -233,6 +242,119 @@ describe("ModelsDev Service", () => {
       expect(final.calls.length).toBe(1)
       expect(final.calls[0].url).toContain("/api.json")
       expect(final.calls[0].userAgent).toContain("/cli")
+    }),
+  )
+
+  it.live("refresh with an unchanged catalog announces nothing, so Locations keep their catalogs", () =>
+    Effect.gen(function* () {
+      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
+      const state = yield* Ref.make(initialState)
+      const announced = yield* Effect.provide(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const events = yield* EventV2.Service
+            const models = yield* ModelsDev.Service
+            const count = yield* Ref.make(0)
+            yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
+              Stream.runForEach(() => Ref.update(count, (n) => n + 1)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            yield* models.get()
+            yield* models.refresh(false)
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+            return yield* Ref.get(count)
+          }),
+        ),
+        buildWithEvents(state),
+      )
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(announced).toBe(0)
+    }),
+  )
+
+  it.live("refresh with a changed catalog announces Refreshed once", () =>
+    Effect.gen(function* () {
+      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
+      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
+      const announced = yield* Effect.provide(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const events = yield* EventV2.Service
+            const models = yield* ModelsDev.Service
+            const count = yield* Ref.make(0)
+            yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
+              Stream.runForEach(() => Ref.update(count, (n) => n + 1)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            yield* models.get()
+            yield* models.refresh(false)
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+            return yield* Ref.get(count)
+          }),
+        ),
+        buildWithEvents(state),
+      )
+      expect(announced).toBe(1)
+    }),
+  )
+
+  it.live("refresh announces a fetch that matches the disk file but not the catalog this process loaded", () =>
+    Effect.gen(function* () {
+      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
+      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
+      const result = yield* Effect.provide(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const events = yield* EventV2.Service
+            const models = yield* ModelsDev.Service
+            const count = yield* Ref.make(0)
+            yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
+              Stream.runForEach(() => Ref.update(count, (n) => n + 1)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            const before = yield* models.get()
+            // Another process refreshed the shared cache file to the catalog models.dev now serves.
+            yield* writeCache(fixture2, Date.now() - 10 * 60 * 1000)
+            yield* models.refresh(false)
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+            return { before, after: yield* models.get(), announced: yield* Ref.get(count) }
+          }),
+        ),
+        buildWithEvents(state),
+      )
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(result.before).toEqual(fixture)
+      expect(result.after).toEqual(fixture2)
+      expect(result.announced).toBe(1)
+    }),
+  )
+
+  it.live("refresh skipped as fresh still adopts a catalog another process just wrote", () =>
+    Effect.gen(function* () {
+      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
+      const state = yield* Ref.make(initialState)
+      const result = yield* Effect.provide(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const events = yield* EventV2.Service
+            const models = yield* ModelsDev.Service
+            const count = yield* Ref.make(0)
+            yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
+              Stream.runForEach(() => Ref.update(count, (n) => n + 1)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            yield* models.get()
+            yield* writeCache(fixture2)
+            yield* models.refresh(false)
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+            return { after: yield* models.get(), announced: yield* Ref.get(count) }
+          }),
+        ),
+        buildWithEvents(state),
+      )
+      expect((yield* Ref.get(state)).calls).toEqual([])
+      expect(result.after).toEqual(fixture2)
+      expect(result.announced).toBe(1)
     }),
   )
 

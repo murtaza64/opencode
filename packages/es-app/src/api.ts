@@ -7,8 +7,10 @@ import type { SquadronMeta } from "./mail-origin"
 import type { WakeEvent } from "./wake-marker"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
-/** Generated text attached to a human's own message; marked synthetic and with its producer. */
-export type ContextPart = { type: "text"; text: string; synthetic: true; metadata: { source: string; key: string } }
+/** Generated text attached to a human's own message; marked synthetic and with its producer. A context mention also
+ * carries where it came from and enough reference to show it under the bubble (never read by the model). */
+export type ContextPart = { type: "text"; text: string; synthetic: true; metadata: { source: string; key: string
+  origin?: "reader" | "chip"; kind?: string; label?: string; revision?: number; href?: string; asOf?: string } }
 export type InputImage = Readonly<SessionV1InputImage>
 export const inputImages = <Mime extends string>(
   images: readonly { mime: Mime; url: string; filename?: string }[],
@@ -58,15 +60,40 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 type Page = { items: MessageWithParts[]; cursor?: string }
+
+// Compact pages (`compact=true`) bound long tool output (state.metadata.pageTruncated; oc.part reads one in full) and
+// replace large file data and tool attachments with Core routes, relative to the Core; they are resolved under this
+// client's base (`/oc`, or `/hosts/<id>/oc` for another host) so an image loads from its own host. Two Core shapes:
+// cf0e31b2 (`.../file` with metadata.compactFile; `.../attachment/<i>`) and sxpozrzx+ (`.../file?bytes=N`).
+// An older Core ignores the parameter and answers full parts, which pass through unchanged.
+const ATTACHMENT = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/
+const FILE_ROUTE = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file(\?bytes=\d{1,12})?$/
+/** A file part whose data is a Core file route (before or after resolving under a base). */
+export const fileReference = (url: string) => /\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file(\?bytes=\d{1,12})?$/.test(url)
+export const compactFile = (part: MessageWithParts["parts"][number]) =>
+  part.type === "file" && FILE_ROUTE.test(part.url) && (/\?bytes=/.test(part.url) || !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile)
+export const attachmentsUnder = (base: string, items: MessageWithParts[]) => items.map((message) => {
+  const routed = (part: MessageWithParts["parts"][number]) => compactFile(part) ||
+    (part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url) || FILE_ROUTE.test(file.url)))
+  if (!message.parts.some(routed)) return message
+  return {
+    ...message,
+    parts: message.parts.map((part) => part.type === "file" && compactFile(part) ? { ...part, url: `${base}${part.url}` }
+      : !routed(part) || part.type !== "tool" || part.state.status !== "completed" ? part : {
+      ...part,
+      state: { ...part.state, attachments: part.state.attachments!.map((file) => ATTACHMENT.test(file.url) || FILE_ROUTE.test(file.url) ? { ...file, url: `${base}${file.url}` } : file) },
+    }),
+  }
+})
 const RECENT_PAGE_MS = 2000
 type Shared = { limit: number; value: Promise<Page>; consumers: number; waiting: number; abort: AbortController; done?: boolean }
 const pages = new Map<string, Shared>()
 const readPage = async (base: string, id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal): Promise<Page> => {
   const res = await fetch(
-    `${base}/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    `${base}/session/${id}/message?${q(directory)}&summaryPatches=false&compact=true&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
     { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
   )
-  const items = await json<MessageWithParts[]>(res)
+  const items = attachmentsUnder(base, await json<MessageWithParts[]>(res))
   return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
 }
 // `exact`: the caller pages with the cursor, so only a read of the same size can serve it.
@@ -194,7 +221,8 @@ const ocFor = (base: string) => ({
     fetch(`${base}/session/${id}?${q(directory)}`, { signal }).then(json<Session>),
 
   messages: (id: string, directory: string, signal?: AbortSignal): Promise<MessageWithParts[]> =>
-    fetch(`${base}/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
+    fetch(`${base}/session/${id}/message?${q(directory)}&summaryPatches=false&compact=true`, { signal })
+      .then(json<MessageWithParts[]>).then((items) => attachmentsUnder(base, items)),
 
   // bounded tail: the newest `limit` messages only (hover insights fallback)
   // Message page reads are single-flight per (session, directory, cursor): opening the Front Desk
@@ -206,6 +234,13 @@ const ocFor = (base: string) => ({
 
   messagesPage: (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) =>
     sharedPage(base, id, directory, limit, before, signal, true),
+
+  /** One full part, for a part a compact page shortened; undefined when it no longer exists. */
+  part: async (id: string, directory: string, messageID: string, partID: string, signal?: AbortSignal) => {
+    const res = await fetch(`${base}/session/${id}/message/${encodeURIComponent(messageID)}/part/${encodeURIComponent(partID)}?${q(directory)}`, { signal })
+    if (res.status === 404 || res.status === 400) return undefined
+    return attachmentsUnder(base, [{ parts: [await json<Part>(res)] } as MessageWithParts])[0]!.parts[0]!
+  },
 
   /** Undefined when the session has no such message (404, or 400 for a malformed ID). */
   message: async (id: string, directory: string, messageID: string, signal?: AbortSignal) => {
@@ -322,9 +357,11 @@ const ocFor = (base: string) => ({
   },
 
   /** `prefix`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
-  usageDaily: async (days: number, signal?: AbortSignal, prefix = ""): Promise<UsageDaily | undefined> => {
+  usageDaily: async (days: number, signal?: AbortSignal, prefix = "", offsetMinutes = -new Date().getTimezoneOffset()): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
-    const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${offsetMinutes}`, { signal })
+    // A host proxy that cannot reach the host answers 5xx: that is an outage, not a Core without the route.
+    if (res.status >= 500) throw new Error(`HTTP ${res.status}`)
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageDaily>(res)
   },
@@ -481,6 +518,8 @@ export type DocContent = {
 }
 
 export type MailMessage = {
+  /** Newer dashboards, received mail only: whether the recipient lane's `es mail check` receipt covers it. */
+  receipt?: { reader: string; read: boolean }
   /** Present on mail the Squadron bridge wrote (`from: integration:squadron`). */
   squadron?: SquadronMeta
   id: string
@@ -520,8 +559,26 @@ export type MailDelivery = {
   wake_observed_at?: number | null
   presented_ms?: number | null
   handled_ms?: number | null
+  /** es-dashboard's delivery tick (es.mail.wake/v1): presented, admitted, queued, recorded or a terminal state. */
+  tick?: string
 }
 export type MailWakeState = "caused" | "joined" | "none" | "unknown"
+/** GET /es/api/mail/wake (es.mail.wake/v1): when this lane's or session's owner wakes next and why, from the
+ * dashboard's real schedulers; `at_ms` only when a scheduler holds a clock time. */
+export type MailWakeStatus = {
+  schema: "es.mail.wake/v1"
+  lane: string | null
+  session: string | null
+  state: "scheduled" | "waiting-idle" | "paused" | "blocked" | "none"
+  next: { reason: string; at_ms: number | null; count?: number } | null
+  pending: { queued: number; admitted: number; unread_passive: number }
+  checked_at: number
+  host?: string
+  wake_now: boolean
+}
+/** POST /es/api/mail/wake: what the operator's Wake now re-offered (same request ids; the runtime coalesces). */
+export type MailWakeResult = { lane: string | null; session: string | null; offered: number; offered_session?: number; busy: boolean
+  review: { action?: string; request_id?: string } | null; state: MailWakeStatus }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
 export type LaneProvenance = {
@@ -640,7 +697,63 @@ export type CurrentWork = {
   }
 }
 
+/** GET /es/api/quota (es-quota/1): subscription windows from local snapshots, one state per provider. Never provider billing. */
+export type QuotaWindow = { id: string; usedPercent: number; resetsAt?: string; windowDurationMins?: number }
+export type QuotaProvider = {
+  provider: "claude" | "codex"
+  state: "not-configured" | "unavailable" | "stale" | "ok"
+  reason?: string
+  source?: string
+  observedAt?: string
+  staleSince?: string
+  /** false: the Codex CLI is not the version the adapter was written against; shown as experimental. */
+  pinned?: boolean
+  windows: QuotaWindow[]
+}
+export type QuotaView = { schema: "es-quota/1"; checkedAt: string; providers: QuotaProvider[] }
+
+export type OpenRouterUsage = {
+  schema: "es-openrouter-usage/1"
+  state: "ok" | "not-configured" | "unavailable"
+  reason?: string
+  observedAt?: string
+  credits_usd?: number | null
+  external_byok_usd?: number | null
+  total_inference_usd?: number | null
+  credits_today_utc_usd?: number | null
+  external_byok_today_utc_usd?: number | null
+  /** Newer dashboards: OpenRouter's UTC week (from Monday) and calendar month to date. */
+  credits_week_utc_usd?: number | null
+  external_byok_week_utc_usd?: number | null
+  credits_month_utc_usd?: number | null
+  external_byok_month_utc_usd?: number | null
+  /** Newer dashboards: a one-way fingerprint of the key, so hosts sharing it count it once. */
+  key_id?: string | null
+  key_limit_usd?: number | null
+  key_remaining_usd?: number | null
+  include_byok_in_key_limit?: boolean | null
+  expires_at?: string | null
+  limit_reset?: string | null
+  effective_budget?: {
+    scope: string
+    limit_usd: number
+    spend_usd: number
+    remaining_usd: number
+    reset_interval: string | null
+    resets_at: string | null
+    include_byok: boolean | null
+  } | null
+}
+
 export const es = {
+  async openrouterUsage(signal?: AbortSignal, prefix = ""): Promise<OpenRouterUsage | undefined> {
+    const response = await fetch(`${prefix}/es/api/usage/openrouter`, { credentials: "include", signal })
+    if (response.status >= 500) throw new Error(`HTTP ${response.status}`)
+    if (response.status === 404 || !response.headers.get("content-type")?.includes("application/json")) return undefined
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const value = await response.json().catch(() => undefined)
+    return value?.schema === "es-openrouter-usage/1" ? value : undefined
+  },
   currentWork: (sessionID: string, directory: string): Promise<CurrentWork> =>
     fetch(`/es/api/current-work?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`)
       .then(statusJson<CurrentWork>),
@@ -673,6 +786,13 @@ export const es = {
   mail: (name: string, recipient: { lane: string } | { session: string }, signal?: AbortSignal): Promise<MailTimeline> =>
     fetch(`/es/api/mail?es=${encodeURIComponent(name)}&${"lane" in recipient
       ? `lane=${encodeURIComponent(recipient.lane)}` : `session=${encodeURIComponent(recipient.session)}`}`, { signal }).then(statusJson<MailTimeline>),
+  mailWake: (name: string, session: string, signal?: AbortSignal): Promise<MailWakeStatus> =>
+    fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<MailWakeStatus>),
+  // Operator only (the dashboard checks the operator cookie and CSRF header); one click = one coalesced wake.
+  wakeNow: (name: string, session: string, signal?: AbortSignal): Promise<MailWakeResult> =>
+    fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, {
+      method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}", signal,
+    }).then(statusJson<MailWakeResult>),
   wakeEvents: (name: string, session: string, signal?: AbortSignal): Promise<{ events: WakeEvent[] }> =>
     fetch(`/es/api/wake-events?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<{ events: WakeEvent[] }>),
   sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>
@@ -680,6 +800,12 @@ export const es = {
       .then(statusJson<SessionInsights>),
   prDetail: (url: string, signal?: AbortSignal): Promise<any> =>
     fetch(`/es/api/pr-detail?url=${encodeURIComponent(url)}`, { signal }).then(statusJson),
+  /** This host's subscription quota snapshots (COST-02 Q1). `prefix`: "" or "/hosts/<id>". undefined = a dashboard without the route. */
+  quota: async (prefix = "", signal?: AbortSignal): Promise<QuotaView | undefined> => {
+    const res = await fetch(`${prefix}/es/api/quota`, { signal })
+    if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
+    return statusJson<QuotaView>(res)
+  },
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
   state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),

@@ -87,7 +87,7 @@ try {
   // Queue, from the secondary menu, also to the Mini.
   await editor().fill("After that, rerun the scorer")
   await more().click()
-  await button("Queue").click()
+  await button("Queue for when idle").click()
   await expect.poll(() => miniInputs().length).toBe(2)
   expect(miniInputs()[1].body.delivery).toBe("queue")
   // The pending inputs are listed from the Mini.
@@ -98,7 +98,7 @@ try {
   await box().getByRole("button", { name: /^Stop/ }).click()
   await expect.poll(() => mini.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/abort").length).toBe(1)
   emitMini("session.status", { sessionID: "ses_a", status: { type: "idle" } })
-  await expect(page.locator(".session-state")).toHaveText("idle")
+  await expect(page.locator(".session-state")).toHaveAttribute("aria-label", "idle")
 
   // Idle: a plain send starts a turn on the Mini.
   await editor().fill("Start the nightly run")
@@ -131,7 +131,7 @@ try {
   // A lost acknowledgement: unknown, kept across reload, read back on the Mini, retried only by request.
   mini.status = "busy"
   emitMini("session.status", { sessionID: "ses_a", status: { type: "busy" } })
-  await expect(page.locator(".session-state")).toHaveText("busy")
+  await expect(page.locator(".session-state")).toHaveAttribute("aria-label", "busy")
   mini.loseInput = true
   await button("Steer").click()
   await expect(page.locator(".input-admission")).toContainText("Not sent")

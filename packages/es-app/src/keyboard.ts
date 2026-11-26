@@ -36,13 +36,20 @@ export const createSequenceMatcher = (enabled: (id: SequenceID) => boolean) => {
 const [whichKey, setWhichKey] = createSignal<{ prefix: string[]; next: { key: string; id: SequenceID }[] }>()
 export { whichKey }
 
-const CHORDS: ShortcutID[] = ["nextRegion", "previousRegion", "focusLeft", "focusDown", "focusUp", "focusRight"]
+const READER_KEYS = ["c", "d", "f", "h", "j", "k", "m", "."]
+
+// Chords work in every scope, text entry included, and are consumed so they never type.
+const CHORDS: ShortcutID[] = ["help", "helpF1", "porter", "nextRegion", "previousRegion", "focusLeft", "focusDown", "focusUp", "focusRight"]
 
 /** Installs the capture-phase listener; returns cleanup. */
 export const installKeyboard = (actions: KeyboardActions) => {
   const matcher = createSequenceMatcher((id) => Boolean(actions[id]))
   let timer: ReturnType<typeof setTimeout> | undefined
+  // A "g" pressed in the composer's Normal mode also reaches its vim (gg, gj, gk); the
+  // sequence only claims the second key when it completes a binding.
+  let shared = false
   const cancel = () => {
+    shared = false
     matcher.reset()
     clearTimeout(timer)
     setWhichKey(undefined)
@@ -58,9 +65,15 @@ export const installKeyboard = (actions: KeyboardActions) => {
       if (!event.repeat) actions[chord]!()
       return
     }
-    if (event.ctrlKey || event.metaKey || event.altKey || isTypingTarget(event.target)) return cancel()
+    // The composer in vim Normal mode is Normal scope (proposal §3), not text entry.
+    const composerNormal = event.target instanceof HTMLTextAreaElement && event.target.classList.contains("vim-normal")
+    if (event.ctrlKey || event.metaKey || event.altKey || (isTypingTarget(event.target) && !composerNormal)) return cancel()
     const key = sequenceKey(event)
     if (!key) return
+    // In the composer's Normal mode "f" and "F" are Vim's find-character motions.
+    if (composerNormal && (key === "f" || key === "F") && !matcher.pending().length) return
+    // An open Surface reader owns its feedback letters (comment, draw, find, hide, walk threads, tell the author, tuck).
+    if (!matcher.pending().length && READER_KEYS.includes(key.toLowerCase()) && document.querySelector(".sc-toolbar")) return
     if (key === "Escape") {
       if (!matcher.pending().length) return
       consume(event)
@@ -73,8 +86,15 @@ export const installKeyboard = (actions: KeyboardActions) => {
     const step = matcher.feed(key)
     if (step.kind === "none") {
       // A pending sequence swallows the unbound key so it has no side effect.
-      if (wasPending) consume(event)
+      if (wasPending && !shared) consume(event)
       return cancel()
+    }
+    if (step.kind === "prefix" && !wasPending && composerNormal && key === "g") {
+      shared = true
+      clearTimeout(timer)
+      const prefix = matcher.pending()
+      timer = setTimeout(() => setWhichKey({ prefix, next: step.next }), 300)
+      return
     }
     consume(event)
     clearTimeout(timer)
@@ -90,6 +110,25 @@ export const installKeyboard = (actions: KeyboardActions) => {
     window.removeEventListener("keydown", handler, true)
     cancel()
   }
+}
+
+/** The view whose composer takes keys aimed at "the" composer when focus is in no text box: the page's own
+ * session, else Porter's when its pane is open. */
+export const primaryView = () =>
+  [...document.querySelectorAll<HTMLElement>(".session-page")].find((el) => !el.closest(".desk-companion")) ??
+  document.querySelector<HTMLElement>(".desk-companion:not(.closed) .session-page") ?? undefined
+
+/** True when `view` should act on a key whose target is outside every session view. */
+export const ownsKey = (view: HTMLElement | undefined, target: EventTarget | null) => {
+  const inside = target instanceof Element ? target.closest(".session-page") : null
+  return inside ? inside === view : !!view && primaryView() === view
+}
+
+/** Text box focus, Normal mode or not: Esc's second step leaves it for the transcript, keeping the draft. */
+export const leaveComposer = (view: HTMLElement | null) => {
+  const transcript = view?.querySelector<HTMLElement>(".transcript")
+  if (!transcript) return (document.activeElement as HTMLElement | null)?.blur()
+  transcript.focus({ preventScroll: true })
 }
 
 /** F6 order: sidebar, page content, composer, Front desk chat. Skips hidden regions. */
@@ -140,6 +179,9 @@ const REGIONS = ["nav.sidebar", ".content", ".prompt-box textarea", ".desk-compa
 
 const focusRegion = (el: HTMLElement) => {
   if (el.matches("textarea, input, [tabindex]")) return el.focus()
+  // Porter's pane is entered at its text box.
+  const box = el.matches(".desk-companion") ? el.querySelector<HTMLElement>(".prompt-box textarea") : null
+  if (box) return box.focus()
   const first = el.querySelector<HTMLElement>("[aria-current], a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])")
   if (first) return first.focus()
   el.setAttribute("tabindex", "-1")

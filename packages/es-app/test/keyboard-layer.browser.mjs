@@ -25,6 +25,22 @@ try {
     await page.keyboard.type("g?")
     await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0)
 
+    // Composer Normal mode (Esc from Insert) is Normal scope: "?" opens help, gg stays vim.
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Shift+Slash")
+    await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    // Focus returns to the composer (its focus rule re-enters Insert).
+    expect(await page.evaluate(() => !!document.activeElement?.matches(".prompt-box textarea"))).toBe(true)
+    await page.locator(".prompt-box textarea").fill("one\ntwo\nthree")
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("G")
+    await page.keyboard.press("g")
+    await page.keyboard.press("g")
+    expect(await page.evaluate(() => document.activeElement.selectionStart)).toBe(0)
+    expect(new URL(page.url()).pathname).toBe("/session/ses_a")
+    await page.locator(".prompt-box textarea").fill("")
+
     // Outside text entry, "?" opens the overlay; it lists dispatched keys only.
     await page.locator(".transcript").click({ position: { x: 5, y: 5 } })
     await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
@@ -44,6 +60,17 @@ try {
     await expect(page.locator(".kbd-which-key")).toBeVisible()
     await page.keyboard.press("z")
     await expect(page.locator(".kbd-which-key")).toHaveCount(0)
+
+    // g u from the composer's Normal mode navigates too.
+    await page.locator(".prompt-box textarea").focus()
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("g")
+    await page.keyboard.press("a")
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/agents")
+    await page.goto(session, { waitUntil: "domcontentloaded", timeout: 180_000 })
+    await page.locator(".prompt-box textarea").waitFor({ timeout: 60_000 })
+    await page.locator(".transcript").click({ position: { x: 5, y: 5 } })
+    await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
 
     // g u navigates in place.
     await page.evaluate(() => { window.kbdMarker = "same-document" })

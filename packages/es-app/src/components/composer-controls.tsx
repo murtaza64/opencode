@@ -2,6 +2,7 @@ import { Show } from "solid-js"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import type { Composer } from "../composer"
 import { ComposerImages } from "./composer-images"
+import { dateTime } from "../local-time"
 
 export const ComposerResults = (props: { composer: Composer; connected: boolean }) => {
   // Outgoing inputs and their delivery state render as bubbles in the transcript
@@ -29,7 +30,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
             <Show when={aside().snapshot}>
               {(snapshot) => (
                 <div class="dim aside-snapshot">
-                  Snapshot {new Date(snapshot().capturedAt).toLocaleString()} · {snapshot().activity.status}
+                  Snapshot {dateTime(snapshot().capturedAt)} · {snapshot().activity.status}
                   <span>
                     Through <bdi>{snapshot().throughMessageID ?? "start of conversation"}</bdi>;{" "}
                     {snapshot().excludedMessageCount} messages excluded

@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import type { QuestionInfo, QuestionRequest, ToolPart } from "@opencode-ai/sdk/v2"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { useOc } from "../session-host"
+import { useOc, useSessionHost } from "../session-host"
 import { assembleQuestionAnswers, questionOptionLabel } from "../question-answer"
 
 export function InlineQuestion(props: {
@@ -12,6 +12,8 @@ export function InlineQuestion(props: {
   onDone: () => Promise<void>
 }) {
   const oc = useOc()
+  // A read-only host takes no answer from this page.
+  const readOnly = !!useSessionHost().readOnly
   const questions = createMemo(() => props.request?.questions ?? (props.part?.state.input.questions as QuestionInfo[] | undefined) ?? [])
   const answers = createMemo(() => {
     if (!props.part || !("metadata" in props.part.state)) return []
@@ -39,7 +41,7 @@ export function InlineQuestion(props: {
   }
 
   const submit = async () => {
-    if (!props.request || sending()) return
+    if (readOnly || !props.request || sending()) return
     const result = assembleQuestionAnswers(questions(), selections(), notes())
     setMissing(new Set(result.missing))
     if (result.missing.length) return
@@ -56,7 +58,7 @@ export function InlineQuestion(props: {
   }
 
   const dismiss = async () => {
-    if (!props.request || sending()) return
+    if (readOnly || !props.request || sending()) return
     setSending(true)
     setError("")
     try {
@@ -130,8 +132,10 @@ export function InlineQuestion(props: {
             )}
           </For>
           <div class="question-actions">
-            <button type="submit" class="question-submit" disabled={sending()}>Answer</button>
-            <button type="button" class="danger" disabled={sending()} onClick={() => void dismiss()}>Dismiss</button>
+            <Show when={!readOnly} fallback={<span class="dim" data-read-only-reply>answer on that host</span>}>
+              <button type="submit" class="question-submit" disabled={sending()}>Answer</button>
+              <button type="button" class="danger" disabled={sending()} onClick={() => void dismiss()}>Dismiss</button>
+            </Show>
             <span class="question-enter">Enter accepts recommendations</span>
           </div>
           <Show when={error()}><div class="err" role="alert">{error()}</div></Show>

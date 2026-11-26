@@ -2928,3 +2928,57 @@ test("an unconfirmed Send survives reload with its ID and is checked, not resent
   expect(reloaded.state.normalSubmission?.absent).toBeFalsy()
   expect(reloaded.state.task.text).toBe("before reload")
 })
+
+test("an image Steer clears the editor while its exact image is still being saved, then admits once", async () => {
+  const store = durableImages()
+  const saving = deferred<void>()
+  let slow = false
+  const images: ImageStore = { ...store, volatile: false, put: async (value, owner) => {
+    if (slow) await saving.promise
+    return store.put(value, owner)
+  } }
+  const { composer, requests } = harness((request) => {
+    if (request.method === "POST") return Response.json({ ...pending("request-1", "look", "steer"), images: [wireImage], agent: undefined })
+    return new Response("not found", { status: 404 })
+  }, { images }, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setText("look")
+  composer.setImages([image])
+  await composer.persistAsync()
+  slow = true
+  const sent = composer.submit(session)
+  await Bun.sleep(0)
+  // While the image save is in flight: the bubble shows it as sending, the editor is already empty, nothing is POSTed.
+  expect(composer.state.admission?.status).toBe("sending")
+  expect(unwrap(composer.state.task)).toMatchObject({ text: "", images: [] })
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+  saving.resolve()
+  await sent
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  expect(composer.state.admission).toBeNull()
+  expect(unwrap(composer.state.task)).toMatchObject({ text: "", images: [] })
+})
+
+test("an image Steer whose exact image cannot be saved puts the draft back and sends nothing", async () => {
+  const store = durableImages()
+  let failing = false
+  const images: ImageStore = { ...store, volatile: false, put: async (value, owner) => {
+    if (failing) throw new Error("quota exhausted")
+    return store.put(value, owner)
+  } }
+  const { composer, requests } = harness(() => { throw new Error("unreachable") }, { images }, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setText("look")
+  composer.setImages([image])
+  await composer.persistAsync()
+  failing = true
+  await composer.submit(session)
+  expect(composer.state.admission).toBeNull()
+  expect(composer.state.error).toContain("No input was sent; draft kept")
+  expect(unwrap(composer.state.task)).toMatchObject({ text: "look", images: [image] })
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+})

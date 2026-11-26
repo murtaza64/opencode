@@ -77,6 +77,14 @@ export const externalURL = (value: string) => {
 // dash.cloudflare.com is Access's "Cloudflare" identity provider (its OAuth authorize page).
 const SIGN_IN = [/\.cloudflareaccess\.com$/, /^dash\.cloudflare\.com$/, /^accounts\.google\.com$/, /^github\.com$/]
 
+/** A page host's user agent: Chromium's own, without the app and Electron product tokens. Google sign-in refuses
+ * user agents that name an embedded framework ("This browser or app may not be secure"); a page tab is a normal
+ * browser view of that host, so it presents as the Chrome it is built on. Only page-host partitions use this. */
+export const plainChromeUserAgent = (agent: string, appName: string) => {
+  const escaped = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return agent.replace(new RegExp(`\\s(?:${escaped}|Electron)/\\S+`, "gi"), "").replace(/\s{2,}/g, " ").trim()
+}
+
 /** Whether a page host's tab may navigate in place: its own origin, or a secure sign-in step. */
 export const pageNavigation = (value: string, origin: string) => {
   const url = URL.parse(value)
@@ -113,7 +121,7 @@ export const internalURL = (value: string, origin: string) => {
 // Published web (3181), dev (3100) and native (60302) serve the same es-app, so a link to an app route
 // on any of them opens that route in this window rather than an external browser.
 const APP_PORTS = ["3181", "3100", "60302"]
-const APP_ROUTE = /^\/(?:|cloud|map|new|desk|issue|doc|session\/[\w-]+)$/
+const APP_ROUTE = /^\/(?:|cloud|map|glasses|new|desk|issue|doc|session\/[\w-]+)$/
 
 export const appRouteURL = (value: string, origin: string) => {
   const url = URL.parse(value)
@@ -130,11 +138,17 @@ export const appRouteURL = (value: string, origin: string) => {
  * already allows, kept verbatim. `created: true` reopens a view on its start page without recording a URL. Nothing
  * opens another host or a non-app route. Undefined, restoring nothing, unless the whole record is valid.
  */
-export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string; kind?: "app" | "page"; start?: string }[]) => {
+/** `shadowed`: page ids now shown by another tab (page id -> that tab's id). A captured view of such a page is not
+ * reopened (its URL is that page's origin); if it was shown, the tab that replaced it is selected. `dropped` counts
+ * those views. */
+export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string; kind?: "app" | "page"; start?: string }[], shadowed: ReadonlyMap<string, string> = new Map()) => {
   if (!value || typeof value !== "object") return undefined
   const record = value as { version?: unknown; selected?: unknown; views?: unknown }
-  if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length || record.views.length > tabs.length) return undefined
-  const views = record.views.map((item: { id?: unknown; url?: unknown; created?: unknown }) => {
+  if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length) return undefined
+  const captured = record.views.filter((item: { id?: unknown }) => typeof item?.id !== "string" || !shadowed.has(item.id))
+  const selected = typeof record.selected === "string" ? shadowed.get(record.selected) ?? record.selected : record.selected
+  if (captured.length > tabs.length) return undefined
+  const views = captured.map((item: { id?: unknown; url?: unknown; created?: unknown }) => {
     const tab = tabs.find((candidate) => candidate.id === item?.id)
     if (!tab) return undefined
     if (item.created !== undefined) return item.created === true && item.url === undefined ? { id: tab.id, url: tab.start ?? `${tab.origin}/` } : undefined
@@ -145,18 +159,24 @@ export const restorePlan = (value: unknown, tabs: readonly { id: string; origin:
     return url ? { id: tab.id, url } : undefined
   })
   if (views.some((item) => !item) || new Set(views.map((item) => item!.id)).size !== views.length) return undefined
-  if (typeof record.selected !== "string" || !views.some((item) => item!.id === record.selected)) return undefined
-  return { selected: record.selected, views: views as { id: string; url: string }[] }
+  // A shown page that was shadowed selects the tab that replaced it, even when that tab had no captured view.
+  const reselected = selected !== record.selected && tabs.some((tab) => tab.id === selected)
+  if (typeof selected !== "string" || !(views.some((item) => item!.id === selected) || reselected)) return undefined
+  const dropped = record.views.length - captured.length
+  return { selected, views: views as { id: string; url: string }[], ...(dropped ? { dropped } : {}) }
 }
 
 // Work view reads of another host through this laptop's listener (/hosts/<id>/...): its session
 // list and statuses, handoff lineage and lane owners (so a pin follows a handoff on that host), one
 // session's record, messages and todos (read-only view in the Local window),
-// daily usage rollup (the Today total), editspace names, open-decision list and Surface list (which the dashboard serves without an operator).
+// daily usage rollup (the Today total), subscription quota snapshot (Usage bars), editspace names, open-decision list, Surface list and
+// permission/question request history (Decisions tab, metadata only) and
+// the Front Desk pointer (which the dashboard serves without an operator; pointer writes stay on the home host's own origin).
+// One lane's or session's mail with its delivery receipts, as that host's own window shows them (mail tool rows).
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|handoffs|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+(?:\/part\/[\w-]+\/(?:attachment\/\d{1,4}|file))?)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer|frontdesk\/cases|decisions\/requests|surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
@@ -167,12 +187,14 @@ export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,
 // Writes to another Work host from this laptop's window (/hosts/<id>/...), Slice W (contract v0.2.1 §4):
 // the same session writes this listener allows on its own host (prompt/input admission, pending-input
 // edit/withdraw/deliver, recovery nudge, stop, Aside ask/cancel, the session model preference), permission
-// and question replies, attention operator sign-in, answers and delivery checks, and Request brief (the owning
-// host's dashboard starts the brief job; operator only). Fork, create and delete
+// and question replies, attention operator sign-in, answers and delivery checks, Request brief (the owning
+// host's dashboard starts the brief job; operator only) and Done/Undo of one requested deliverable revision (the owning
+// host's seen state; operator only). Fork, create and delete
 // stay on that host's own window. Pin writes (`hostPinWrite`) reach only that host's own store.
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+const SURFACE_ID = "[a-z0-9][a-z0-9-]{0,39}"
 const HOST_WRITES: Record<string, RegExp> = {
-  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery))|es/api/frontdesk/briefs/${UUID}/regenerate)$`),
+  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery))|es/api/frontdesk/briefs/${UUID}/regenerate|es/api/frontdesk/deliverables/seen|es/api/surfaces/${SURFACE_ID}/comments)$`),
   PATCH: /^\/oc\/session\/[\w-]+(?:\/input\/[\w-]+)?$/,
   DELETE: /^\/oc\/session\/[\w-]+\/(?:input|aside)\/[\w-]+$/,
 }
@@ -201,8 +223,8 @@ export const hostPinWrite = (method: string, pathname: string) => HOST_PIN_WRITE
 export const hostWriteAllowed = (method: string, pathname: string) => (HOST_WRITES[method]?.test(pathname) ?? false) || hostPinWrite(method, pathname)
 
 /** Another host's attention routes, which its dashboard authorizes with that host's operator cookie. */
-// Dashboard routes of another host that carry that host's operator cookie: attention and Request brief.
-export const hostAttention = (pathname: string) => new RegExp(`^/es/api/(?:attention/(?:session|${UUID}(?:/commands|/delivery)?)|frontdesk/briefs/${UUID}/regenerate)$`).test(pathname)
+// Dashboard routes of another host that carry that host's operator cookie: attention, Request brief and deliverable Done.
+export const hostAttention = (pathname: string) => new RegExp(`^/es/api/(?:attention/(?:session|${UUID}(?:/commands|/delivery)?)|frontdesk/briefs/${UUID}/regenerate|frontdesk/deliverables/seen|surfaces/${SURFACE_ID}/comments)$`).test(pathname)
 
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {
@@ -213,8 +235,19 @@ export const apiAllowed = (method: string, pathname: string) => {
       // One completed tool part's large attachment (an image or file a tool returned), fetched lazily
       // by its index instead of inline in the message page. Read-only; Core checks the part's session.
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
-      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/ignored-failures|surfaces|pins|pins\/events)$/,
+      // A user/assistant file part's bytes (a pasted screenshot), referenced by compact pages instead of inlined.
+      /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file$/,
+      // One full part (Core part.get), read when a tool row a compact page shortened is opened. Read-only.
+      /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+$/,
+      /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
+      /^\/es\/api\/usage\/openrouter$/,
+      // Porter memory archive (dotfiles#295): doc list, search, one doc.
+      /^\/es\/api\/frontdesk\/archive(?:\/search|\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64}))?$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
+      // Per-session wake state (es.mail.wake/v1): next wake time and reason from the dashboard's schedulers; read-only.
+      /^\/es\/api\/mail\/wake$/,
+      // One Surface's on-surface comments (operator text and anchors only); read-only here.
+      /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
       /^\/es\/api\/frontdesk\/(model|conversation)$/,
@@ -237,6 +270,10 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs\/self$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
+      // Wake now (DD #414): the dashboard checks operator, CSRF and channel ui, then re-offers existing admissions.
+      /^\/es\/api\/mail\/wake$/,
+      // The operator comments on one Surface revision; the dashboard checks operator, CSRF, size and the client id.
+      /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       // The operator rates one prepared brief; the dashboard checks operator, CSRF and that it is a brief.
       /^\/es\/api\/frontdesk\/brief-feedback$/,
       // One masked decision field's single submission; the dashboard checks handle, operator, origin and scope.
@@ -246,8 +283,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/frontdesk\/briefs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/regenerate$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/, new RegExp(`^/es/api/pins/${PIN_REF}/order$`)],
-    PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
-    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
+    PUT: [/^\/es\/api\/frontdesk\/archive\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64})$/, /^\/es\/api\/(subscriptions|frontdesk\/memory|frontdesk\/pointer)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
+    DELETE: [/^\/es\/api\/frontdesk\/archive\/doc\/(?:[a-z0-9][a-z0-9._-]{0,95}|sessions\/\d{4}-\d{2}-\d{2}-ses_[A-Za-z0-9_]{6,64})$/, /^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
 }

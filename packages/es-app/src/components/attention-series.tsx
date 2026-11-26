@@ -40,7 +40,7 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
           <Show when={record.status === "withdrawn"}><span class="attention-series-withdrawn">Withdrawn</span></Show>
         </div>
         <Show when={record.status !== "withdrawn"}>
-          <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(record.context)} cacheKey={`series:${record.editspace}:${record.id}:${record.revision}`} /></div>
+          <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(record.context, {})} cacheKey={`series:${record.editspace}:${record.id}:${record.revision}`} /></div>
           <Show when={record.options.length && record.status !== "open" && record.status !== "decided"}><div class="home-source">Suggestions</div><ul class="attention-series-suggestions" aria-label={`Suggestions for question ${record.series!.index}`}>
             <For each={record.options}>{option => <li><bdi dir="auto">{option.label}</bdi><Show when={record.recommendation === option.id}> <span class="attention-series-recommended">Recommended</span></Show></li>}</For>
           </ul></Show>

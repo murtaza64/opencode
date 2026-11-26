@@ -507,9 +507,20 @@ export function SessionTurn(
                               </StickyAccordionHeader>
                               <Accordion.Content>
                                 <Show when={shown()}>
-                                  <div data-slot="session-turn-diff-view" data-scrollable>
-                                    <Dynamic component={fileComponent} mode="diff" fileDiff={view.fileDiff} />
-                                  </div>
+                                  <Show
+                                    when={view.omitted ? undefined : view}
+                                    fallback={
+                                      <div data-slot="session-turn-diff-omitted">
+                                        {i18n.t("ui.sessionTurn.diffs.omitted")}
+                                      </div>
+                                    }
+                                  >
+                                    {(shownView) => (
+                                      <div data-slot="session-turn-diff-view" data-scrollable>
+                                        <Dynamic component={fileComponent} mode="diff" fileDiff={shownView().fileDiff} />
+                                      </div>
+                                    )}
+                                  </Show>
                                 </Show>
                               </Accordion.Content>
                             </Accordion.Item>

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { CONTEXT_MENTION_SOURCE, contextBound, contextGroups, contextKey, contextPart, insertContextLabel, type ContextRef } from "./context-mention"
+import { appendContextLabel, CONTEXT_MENTION_SOURCE, contextBound, contextGroups, contextKey, contextPart, decisionRef, insertContextLabel, type ContextRef } from "./context-mention"
 
 const sessions = [
   { id: "ses_self", title: "Relay worker", directory: "/w/self", updated: 9 },
@@ -91,6 +91,23 @@ test("a surface part is metadata only and says its content is not included", () 
   expect(part.metadata.key).toBe("surface:mini:4096:board")
 })
 
+test("the transcript metadata says where a part came from and links its exact revision, without changing the text", () => {
+  const [chipRef] = withCatalog("", [], [surface("board", 1)])[0]!.items
+  const reader = contextPart(chipRef!, "https://mini/?surface=board", Date.UTC(2026, 9, 27), "reader")
+  const chip = contextPart(chipRef!, "https://mini/?surface=board", Date.UTC(2026, 9, 27))
+  // Same model-facing text for both origins: only this app's transcript reads the difference.
+  expect(reader.text).toBe(chip.text)
+  expect(reader.metadata).toMatchObject({ source: CONTEXT_MENTION_SOURCE, key: "surface:mini:4096:board", origin: "reader", kind: "surface",
+    label: "Relay board", revision: 4, href: "https://mini/?surface=board&rev=4", asOf: "2026-10-27T00:00:00.000Z" })
+  expect(chip.metadata.origin).toBe("chip")
+  const [decisionItem] = withCatalog("", [decision("d1", "open", 1)], [])[0]!.items
+  expect(contextPart(decisionItem!, "https://mini/?item=attention%3Aes%3Ad1", 0).metadata.href).toBe("https://mini/?item=attention%3Aes%3Ad1&rev=3")
+  // A chip with no revision (an agent or a session) adds no `rev`.
+  const agent: ContextRef = { kind: "agent", id: "es/lane", host: "mini:4096", label: "lane", editspace: "es", lane: "lane" }
+  expect(contextPart(agent, "https://mini/session/ses_a", 0).metadata).toEqual({ source: CONTEXT_MENTION_SOURCE, key: "agent:mini:4096:es/lane",
+    origin: "chip", kind: "agent", label: "lane", href: "https://mini/session/ses_a", asOf: "1970-01-01T00:00:00.000Z" })
+})
+
 test("a long multi-byte snapshot stays within 2 KB of UTF-8 and keeps its reference", () => {
   const [ref] = withCatalog("", [decision("d1", "open", 1, { context: "é界".repeat(3000), options: Array.from({ length: 20 }, (_, index) => ({ id: `${index}`, label: "選".repeat(500) })) })], [])[0]!.items
   const part = contextPart(ref!, "https://mini/?item=x", 0)
@@ -101,4 +118,19 @@ test("a long multi-byte snapshot stays within 2 KB of UTF-8 and keeps its refere
 test("a session with an unknown update time still produces its part", () => {
   const ref: ContextRef = { kind: "session", id: "ses_x", host: "mini:4096", label: "X", directory: "/w", updated: Number.NaN }
   expect(contextPart(ref, "https://mini/session/ses_x", 0).text).toContain("Last updated: unknown")
+})
+
+test("Ask about this builds the same decision chip as the @ picker", () => {
+  const record = { id: "att_1", editspace: "fixture", revision: 3, content_revision: 2, status: "open", lane: "lane-a", kind: "decision", title: "Pick a route",
+    context: "Which route?", options: [{ id: "a", label: "A" }], recommendation: "A", updated_at: 5 } as unknown as Parameters<typeof decisionRef>[0]
+  const picked = contextGroups({ query: "route", host: "here:1", agents: [], currentID: "ses_a", added: [], sessions: [], laneOf: () => undefined, decisions: [record] })
+    .find((group) => group.name === "Decisions")!.items[0]
+  expect(decisionRef(record, "here:1")).toEqual(picked as ReturnType<typeof decisionRef>)
+  expect(decisionRef(record, "mini")).toMatchObject({ kind: "decision", id: "att_1", host: "mini", label: "Pick a route", editspace: "fixture", revision: 2 })
+})
+
+test("appending a chip label keeps the draft and puts the caret after the label", () => {
+  expect(appendContextLabel("", "Pick a route")).toEqual({ text: "@Pick a route ", caret: 14 })
+  expect(appendContextLabel("why not B?", "Pick  a\nroute")).toEqual({ text: "why not B? @Pick a route ", caret: 25 })
+  expect(appendContextLabel("line\n", "X")).toEqual({ text: "line\n@X ", caret: 8 })
 })

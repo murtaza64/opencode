@@ -12,12 +12,15 @@ export interface DialogProps extends ParentProps {
   classList?: ComponentProps<"div">["classList"]
   fit?: boolean
   transition?: boolean
+  /** The dialog's root element, for callers that mark it (and its overlay) instead of styling with `:has()`. */
+  ref?: (el: HTMLDivElement) => void
 }
 
 export function Dialog(props: DialogProps) {
   const i18n = useI18n()
   return (
     <div
+      ref={props.ref}
       data-component="dialog"
       data-fit={props.fit ? true : undefined}
       data-size={props.size || "normal"}

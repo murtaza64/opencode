@@ -5,7 +5,7 @@ import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
 import { SessionFailure } from "@/session/failure"
 import { Worktree } from "@/worktree"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
+import { NonNegativeInt, PositiveInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
@@ -50,8 +50,19 @@ const CapabilitiesResponse = Schema.Struct({
   }),
   /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
   noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
-  /** Sessions carry `time.turn {started?, ended?}`, written only at turn boundaries. */
-  session: Schema.optionalKey(Schema.Struct({ turnTime: Schema.Literal(true) })),
+  /**
+   * `turnTime`: sessions carry `time.turn {started?, ended?}`, written only at turn boundaries.
+   * `lastMessage`: `GET /experimental/session` rows carry `lastMessage` (absent = unknown).
+   * `summaryPatchBudget`: present when user message summaries inline at most this many UTF-8 bytes of patch text;
+   * other files carry `patchOmitted: true` and `GET /session/:sessionID/diff?messageID=` returns their patches.
+   */
+  session: Schema.optionalKey(
+    Schema.Struct({
+      turnTime: Schema.Literal(true),
+      lastMessage: Schema.optionalKey(Schema.Literal(true)),
+      summaryPatchBudget: Schema.optionalKey(PositiveInt),
+    }),
+  ),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({

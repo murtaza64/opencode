@@ -1,4 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
+import { pageHidden } from "./page-visible"
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { oc, type AttentionNotification } from "./api"
 import { createServerEvents } from "./event-source"
@@ -34,6 +35,10 @@ export const createSessionActivity = (
   const [statuses, setStatuses] = createSignal<Record<string, { type: string }>>({})
   let statusRevision = 0
   const statusVersions = new Map<string, number>()
+  // The status revision when the event stream last dropped: statuses from before it are not authoritative until re-read.
+  const dropped = { at: -1 }
+  // Directories whose status read succeeded since the last drop: their statuses are fresh observations again.
+  const fresh = new Set<string>()
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
   const children = createMemo(() => {
@@ -84,8 +89,18 @@ export const createSessionActivity = (
     const ids = family(id)
     return requests().filter((item) => ids.has(item.request.sessionID))
   }
+  // While the stream is down (or a directory has not been re-read since), a status from before the drop is not
+  // authoritative: unknown, never a stale busy (Personal032 Core OOM, orchestrator #818). An event that arrived after
+  // the stream came back is authoritative again.
+  const stale = (id: string) => {
+    const snapshot = snapshots()[index().get(id)?.directory ?? ""]
+    // Only after a real stream drop (at >= 0): a failed status read with the stream up keeps the last known state.
+    const directory = index().get(id)?.directory ?? ""
+    return dropped.at >= 0 && !fresh.has(directory) && !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
+  }
+  const liveStatus = (id: string) => stale(id) ? undefined : statuses()[id]
   const running = (id: string) => [...family(id)].filter((owner) => {
-    const type = statuses()[owner]?.type
+    const type = liveStatus(owner)?.type
     return type === "busy" || type === "retry"
   })
   const error = (id: string, directory?: string) => {
@@ -179,6 +194,8 @@ export const createSessionActivity = (
     const active = inflight.get(directory)
     if (active) return afterReply ? active.promise.then(() => refreshDirectory(directory)) : active.promise
     const before = statusRevision
+    // A read counts as fresh after a drop only if it started after that drop (not one in flight across it).
+    const epoch = dropped.at
     const events: Event[] = []
     const promise = (async () => {
       const [status, permissions, questions] = await Promise.allSettled([
@@ -187,6 +204,7 @@ export const createSessionActivity = (
         background(() => oc.questions(directory)),
       ])
       if (disposed) return
+      if (status.status === "fulfilled" && epoch >= 0 && epoch === dropped.at) fresh.add(directory)
       batch(() => {
         if (status.status === "fulfilled") {
           // Status belongs to a Session, not a directory spelling. Only its
@@ -234,9 +252,11 @@ export const createSessionActivity = (
       Object.values(snapshot.status).some((status) => status.type === "busy" || status.type === "retry"))
       .map(([directory]) => directory),
   ])].sort(), [], { equals: (a, b) => a.length === b.length && a.every((value, index) => value === b[index]) })
+  // Each directory is three reads; two directories at a time leave the browser's six-socket pool
+  // room for the transcript and dashboard reads a slow Core would otherwise queue behind these.
   const refresh = async (dirs = relevant()) => {
-    for (let offset = 0; offset < dirs.length && !disposed; offset += 4) {
-      await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory)))
+    for (let offset = 0; offset < dirs.length && !disposed; offset += 2) {
+      await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory)))
     }
   }
   let seenNotifications = new Set<string>()
@@ -252,7 +272,8 @@ export const createSessionActivity = (
     seenNotifications = current
     // Dashboard polling can discover a gate whose event never reached this client.
     // Recheck its owner directory even if an earlier snapshot said it was empty.
-    await Promise.all([...directories].map((directory) => refreshDirectory(directory, true)))
+    const dirs = [...directories]
+    for (let offset = 0; offset < dirs.length && !disposed; offset += 2) await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory, true)))
     for (const item of notifications) {
       if (item.kind === "idle") continue
       if (snapshots()[item.directory]?.error) seenNotifications.delete(`${item.kind}\u0000${item.id}\u0000${item.session}\u0000${item.directory}`)
@@ -290,14 +311,22 @@ export const createSessionActivity = (
       return
     }
     lastSessionRefresh = Date.now()
+    lastFocusRefresh = Date.now()
     refreshSessions()
-    void refresh()
+    // Also every directory holding a live non-idle status: a session that turned busy by event after its last read
+    // would otherwise keep that status (a Core that restarted meanwhile no longer runs it).
+    const live = Object.entries(statuses()).filter(([, value]) => value.type !== "idle").map(([id]) => index().get(id)?.directory)
+    // Chained after any read in flight: a fetch started before the drop may predate a Core restart.
+    const dirs = [...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])]
+    void (async () => { for (let offset = 0; offset < dirs.length && !disposed; offset += 2) await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory, true))) })()
     todos.reload()
     options?.reconnected?.()
   }
   source.onerror = () => {
     if (disposed) return
     setConnectionError("Activity connection lost. Reconnecting; requests and status may be outdated.")
+    dropped.at = statusRevision
+    fresh.clear()
     setSnapshots((current) => Object.fromEntries(Object.entries(current).map(([directory, snapshot]) =>
       [directory, { ...snapshot, statusKnown: false, permissionsKnown: false, questionsKnown: false }])))
   }
@@ -338,36 +367,37 @@ export const createSessionActivity = (
       void refresh()
     }
   }
-  let relevantCursor = 0
-  let backgroundCursor = 0
   let ticks = 0
   const interval = setInterval(() => {
+    if (pageHidden()) return
     // Session rows follow session.* events; the full index (~1 MB with a long
     // history) is only a safety net against missed events.
     if (ticks++ % 4 === 0 && Date.now() - lastSessionRefresh >= 60_000) {
       lastSessionRefresh = Date.now()
       refreshSessions()
     }
-    const dirs = relevant()
-    const background = [...new Set(sessions().map((session) => session.directory))].filter((directory) => !dirs.includes(directory))
-    // The global stream and dashboard notifications handle immediate attention;
-    // scan historical directories slowly for missed events without polling all of them each tick.
-    const next = [
-      ...Array.from({ length: Math.min(2, dirs.length) }, (_, i) => dirs[(relevantCursor + i) % dirs.length]!),
-      ...Array.from({ length: Math.min(4, background.length) }, (_, i) => background[(backgroundCursor + i) % background.length]!),
-    ]
-    relevantCursor += 2
-    backgroundCursor += 4
-    void refresh(next)
   }, 30_000)
+  // Directory snapshots follow the global stream, dashboard notifications and the resync on every stream open
+  // (reconnect, and showing a hidden page). There is no timed sweep of historical directories (approved removal,
+  // attention ddc5f6e6). As a bound on a missed event, focusing the window rereads the directories in view when
+  // none was reread in the last ten minutes.
+  let lastFocusRefresh = Date.now()
+  const focused = () => {
+    if (disposed || pageHidden() || Date.now() - lastFocusRefresh < 600_000) return
+    lastFocusRefresh = Date.now()
+    void refresh()
+  }
+  if (typeof window !== "undefined") window.addEventListener("focus", focused)
   onCleanup(() => {
     disposed = true
     source.close()
     clearTimeout(timer)
     clearInterval(interval)
+    if (typeof window !== "undefined") window.removeEventListener("focus", focused)
   })
   const status = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
+    if (stale(id)) return undefined
     return statuses()[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
   }
   const idle = (id: string) => !connectionError() && [...family(id)].every((owner) => {

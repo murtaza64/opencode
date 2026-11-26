@@ -31,7 +31,7 @@
     height 280ms cubic-bezier(0.2, 0, 0, 1),
     box-shadow 160ms ease-out;
 
-  &:has(> [data-icon]) {
+  &[data-has-icon] {
     grid-template-columns: 16px minmax(0, 1fr) 20px;
   }
 
@@ -75,7 +75,7 @@
     overflow: hidden;
   }
 
-  &:has(> [data-icon]) > [data-content] {
+  &[data-has-icon] > [data-content] {
     grid-column: 2;
   }
 
@@ -100,7 +100,7 @@
     justify-content: center;
   }
 
-  &:has(> [data-icon]) > [data-close-button] {
+  &[data-has-icon] > [data-close-button] {
     grid-column: 3;
   }
 
@@ -165,7 +165,7 @@
     gap: 8px;
   }
 
-  &:has(> [data-icon]) [data-slot="toast-v2-actions"] {
+  &[data-has-icon] [data-slot="toast-v2-actions"] {
     grid-column: 2;
   }
 

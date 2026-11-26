@@ -1,6 +1,8 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
+import { pageHidden } from "../page-visible"
 import { ResizeHandle } from "../components/resize-handle"
+import { createStore } from "solid-js/store"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
@@ -9,8 +11,8 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { es, ocAt, type ContextPart } from "../api"
-import { SessionHostProvider, useOc, type SessionHost } from "../session-host"
-import { readHostLineage } from "../host-items"
+import { SessionHostProvider, useOc, useSessionHost, type SessionHost } from "../session-host"
+import { hostPrefix, readHostLineage } from "../host-items"
 import { createHostActivity } from "../host-activity"
 import { hostBase } from "../host-base"
 import { readHost } from "../host"
@@ -19,16 +21,19 @@ import { useLiveSession } from "../live-session-cache"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { ContextChips, ContextPicker } from "../components/context-picker"
-import { contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
+import { appendContextLabel, contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
 import { useDeskQueue } from "../desk-queue"
+import { useDeskChatOptional } from "../desk-companion"
+import { DESK } from "../desk-identity"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
-import { linkUrl, sessionHref, useDashboard } from "../state"
+import { ago, linkUrl, sessionHref, useDashboard } from "../state"
 import { companionDocked, rightOpen } from "../ui"
 import { createVim } from "../vim"
 import { contextLimit, contextUsage, latestCompletedTurn } from "../context-usage"
 import { ComposerMeta } from "../components/composer-meta"
+import { ModelPicker } from "../components/model-picker"
 import { footerContext, footerCost } from "../composer-meta"
 import { primaryAction } from "../primary-action"
 import { sendContext } from "../input-context"
@@ -43,7 +48,12 @@ import { flash } from "../motion"
 import { Glyph, HostGlyph } from "../components/icons"
 import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff"
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
-import { MailRecords } from "../mail-receipts"
+import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
+import { DeliveredTick } from "../components/message-tick"
+import { ContextLines } from "../components/context-line"
+import { chatDot } from "../chat-activity"
+import { clockTime, exactTime } from "../local-time"
+import { lastAudible, quietTurns } from "../quiet-turns"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -52,14 +62,17 @@ import { livingActivity, setLivingActivity } from "../appearance"
 import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
-import { TodoPart } from "../components/todos"
+import { TodoList, TodoPart } from "../components/todos"
 import { MailRow } from "../components/mail-row"
+import { createMailWake, MailWakeBar } from "../components/mail-wake-bar"
+import { mailUnread } from "../mail-ticks"
 import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
 import { canonicalMail, mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, pendingHandoffFor, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
+import { activityBrief } from "../activity-brief"
 import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
 import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
@@ -74,7 +87,12 @@ import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
+import { accessState } from "../access-auth"
+import { EarlierSession, HandoffRule, type SegmentControl } from "../components/earlier-session"
+import { deskChain, laneChain, successionPredecessor, type Chain, type ChainLink } from "../transcript-chain"
 import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
+import { leaveComposer, ownsKey } from "../keyboard"
+import { markAncestor } from "../dom-marks"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -105,6 +123,8 @@ export const STATUS_DELAY_MS = 2000
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const oc = useOc()
+  // A read-only host takes no reply from this page: the request shows, its actions do not.
+  const readOnly = !!useSessionHost().readOnly
   const [error, setError] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const act = async (reply: "once" | "always" | "reject") => {
@@ -156,11 +176,13 @@ function PermissionBanner(props: { p: any; directory: string; owner?: string; on
           <Show when={props.owner}><span class="dim permission-owner">from subagent: {props.owner}</span></Show>
         </div>
         <Show when={summary()}><bdi class="permission-summary mono" dir="ltr" title={summary()}>{summary()}</bdi></Show>
-        <div class="banner-actions">
-          <button disabled={sending()} onClick={() => act("once")}>allow once</button>
-          <button disabled={sending()} onClick={() => act("always")}>always</button>
-          <button disabled={sending()} class="danger" onClick={() => act("reject")}>reject</button>
-        </div>
+        <Show when={!readOnly} fallback={<span class="dim" data-read-only-reply>answer on that host</span>}>
+          <div class="banner-actions">
+            <button disabled={sending()} onClick={() => act("once")}>allow once</button>
+            <button disabled={sending()} onClick={() => act("always")}>always</button>
+            <button disabled={sending()} class="danger" onClick={() => act("reject")}>reject</button>
+          </div>
+        </Show>
       </div>
       <Show when={props.p.patterns?.length || meta().length}>
         <details class="permission-details">
@@ -203,10 +225,11 @@ export default function SessionPage() {
         const [info] = createResource(() => readHost())
         return <Show when={info()}>{(page) => {
           const base = hostBase(other, page().id)
-          if (!base) return <main class="session-page"><p class="err" role="alert">Unknown host.</p></main>
+          if (!base) return <main class="session-page" ref={(el) => markAncestor(() => el, ".content", "session-page", true)}><p class="err" role="alert">Unknown host.</p></main>
           if (base === "/oc") return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} />
-          const label = page().work.find((item) => item.id === other)?.label ?? other
-          return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} host={{ id: other, label, base }} />
+          const item = page().work.find((item) => item.id === other)
+          return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)}
+            host={{ id: other, label: item?.label ?? other, base, ...(item?.readOnly ? { readOnly: true as const } : {}) }} />
         }}</Show>
       }}
     </Show>
@@ -214,7 +237,13 @@ export default function SessionPage() {
 }
 
 /** `embedded` drops the page-level info panel. `headerStart` leads the header, for a host's own pane control. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. `host`: another Work host whose session this is; every read, stream, write and saved draft then belongs to that host. */
-export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost }) {
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: (send: { input: boolean }) => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean, send: { input: boolean }) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost
+  /** A context chip to add to this draft once (Ask about this); `onIncoming` acknowledges it. */
+  incoming?: () => ContextRef | undefined; onIncoming?: () => void
+  /** True while this view is on the page but hidden (a closed Front desk chat). */
+  hidden?: () => boolean
+  /** Fold turns that end without text into one quiet row, named for this agent (the Front desk chat). */
+  quiet?: string }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const sessionHost: SessionHost = props.host ?? { base: "/oc" }
@@ -222,6 +251,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // another host's session shows none of it, and offers no fork, archive or delete (that host exposes no
   // such route to this window). Rename goes to that host (SessionTitle).
   const remote = !!sessionHost.id
+  const deskChat = useDeskChatOptional()
+  const desk = () => !!deskChat?.desk.isDesk(sessionID, sessionHost.id)
   const oc = ocAt(sessionHost.base)
   const composer = getComposer(sessionID, directory, props.host)
   if (remote) adoptHostSessionState(composer, sessionHost.id!, sessionID)
@@ -354,10 +385,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
   onMount(() => {
     const timer = window.setInterval(() => {
-      if (!connected()) return
+      if (!connected() || pageHidden()) return
       // Capabilities that failed to load (slow daemon) retry here; Steer/Queue stay disabled until then.
       if (composer.state.capabilityError) void composer.loadCapabilities()
-      void composer.refreshInputs()
+      // Only while this composer has an input in flight, pending or set aside; session.input.* events cover the rest.
+      const state = composer.state
+      if (state.admission || state.recoveries.length || Object.keys(state.inputChecks).length || Object.keys(state.inputEdits).length ||
+        (state.normalSubmission && state.normalSubmission.status !== "accepted") ||
+        state.receipts.some((receipt) => receipt.state === "pending")) void composer.refreshInputs()
     }, 5000)
     onCleanup(() => window.clearInterval(timer))
   })
@@ -388,7 +423,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
   let userScroll = false
   const loadEarlier = async () => {
-    if (!transcriptEl || !live.hasOlder() || live.loadingOlder()) return
+    if (!transcriptEl || live.loadingOlder()) return
+    if (!live.hasOlder()) return loadEarlierSession()
     stick = false
     userScroll = false
     // Measure before mounting held-back rows so the restore below covers them too.
@@ -401,6 +437,40 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (transcriptEl) transcriptEl.scrollTop = top + transcriptEl.scrollHeight - height
     } catch (failure) {
       setError(`Unable to load earlier messages: ${errorText(failure)}`)
+    }
+  }
+  // Past this session's first message: older rows of the top earlier session, else the next earlier session. The row
+  // at the top of the view keeps its place on screen while rows are added above it.
+  let earlierLoading = false
+  const loadEarlierSession = async () => {
+    if (!transcriptEl || earlierLoading || !live.loaded()) return
+    const ids = shownIDs()
+    const top = ids.length ? segments[ids[0]!] : undefined
+    if (top && !top.ready()) return
+    if (!top?.hasOlder() && !earlierLeft()) return
+    earlierLoading = true
+    stick = false
+    userScroll = false
+    mountAll()
+    const anchor = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message], .handoff-rule")]
+      .find((element) => element.getBoundingClientRect().bottom > transcriptEl!.getBoundingClientRect().top)
+    const offset = anchor ? anchor.getBoundingClientRect().top : 0
+    const keep = () => { if (anchor && transcriptEl) transcriptEl.scrollTop += anchor.getBoundingClientRect().top - offset }
+    try {
+      if (top?.hasOlder()) await top.older()
+      else {
+        setShownEarlier((count) => count + 1)
+        const next = shownIDs()[0]!
+        // Holds the anchor while the earlier session's first page arrives and renders.
+        for (let frame = 0; frame < 600 && !segments[next]?.ready(); frame++) {
+          keep()
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      keep()
+    } finally {
+      earlierLoading = false
     }
   }
   const inspectSubagent = (id: string) => {
@@ -464,11 +534,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     onCleanup(() => observer.disconnect())
     // The composer growing or shrinking resizes the transcript's viewport, not its content. A view that was at the
     // bottom stays there; a reader scrolled up keeps the same messages in view (scrollTop is unchanged).
+    // Both the composer and the outgoing rows can grow in the same frame (a Steer gains its row while the draft
+    // image leaves the composer). Measure "was at the bottom" against the sizes from before that frame, or the new
+    // content height makes a pinned transcript look scrolled up and the re-pin is skipped.
     let viewportHeight = transcriptEl?.clientHeight ?? 0
+    let contentHeight = transcriptEl?.scrollHeight ?? 0
     const viewport = new ResizeObserver(() => {
       if (!transcriptEl) return
-      const wasBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop - viewportHeight < 4
+      const wasBottom = contentHeight - transcriptEl.scrollTop - viewportHeight < 4
       viewportHeight = transcriptEl.clientHeight
+      contentHeight = transcriptEl.scrollHeight
       if (stick && wasBottom) pin()
     })
     if (transcriptEl) viewport.observe(transcriptEl)
@@ -483,17 +558,42 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const attentionError = () => (remote ? "" : sessionsError()) || activity.error(sessionID, directory)
 
   const session = () => live.data.session[0]
+  // One continuous transcript (DD #857/#858): earlier sessions of this one's verified chain load above it on scroll-up,
+  // read-only, each from its own host. The desk follows the home pointer; other sessions their lane's handoff edges.
+  const [segments, setSegments] = createStore<Record<string, SegmentControl>>({})
+  const [shownEarlier, setShownEarlier] = createSignal(0)
+  const chain = createMemo((): Chain => {
+    if (!desk()) {
+      // Another host's chain is that host's own lineage; here an earlier session must also be known to this host.
+      const value = laneChain(sessionID, lineage())
+      const known = remote ? value.links.length : value.links.findIndex((link) => !activity.session(link.session))
+      return known === -1 ? value : { links: value.links.slice(0, known) }
+    }
+    const earlier = (deskChat?.desk.earlier() ?? []).filter((entry) => entry.from === "home")
+      .map((entry) => ({ session: entry.session, directory: entry.directory, ...(entry.host ? { host: entry.host } : {}), ...(entry.until ? { until: entry.until } : {}) }))
+    return deskChain(sessionID, earlier, (id) => successionPredecessor(id === sessionID ? live.data.session[0]?.metadata : segments[id]?.metadata()))
+  })
+  const shownIDs = createMemo(() => chain().links.slice(0, shownEarlier()).map((link) => link.session).reverse(), [],
+    { equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index]) })
+  const earlierLeft = () => chain().links.length > shownEarlier()
+  const earlierHref = (link: ChainLink) => {
+    const dir = link.directory ?? sessionDir(link.session)
+    return link.host ? `${sessionHref(link.session, dir)}&host=${encodeURIComponent(link.host.id)}` : hrefFor(link.session, dir)
+  }
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
-  const echo = createMemo(() => pendingEcho(composer.state.normalSubmission, messages().map((message) => ({
-    id: message.id,
-    role: message.role,
-    text: message.role === "user"
-      // Typed text only: attached context arrives as synthetic text parts of the same message.
-      ? (live.data.part[message.id] ?? []).flatMap((part) => part.type === "text" && !part.synthetic ? [part.text] : []).join("")
-      : undefined,
-  }))))
+  const echo = createMemo(() => {
+    const submission = composer.state.normalSubmission
+    if (!submission) return false
+    const candidates = submission.messageID ? messages().filter(message => message.id === submission.messageID) : messages()
+    return pendingEcho(submission, candidates.map(message => {
+      const parts = live.data.part[message.id] ?? []
+      const text = message.role === "user" ? parts.flatMap(part => part.type === "text" && !part.synthetic ? [part.text] : []).join("") : undefined
+      return { id: message.id, role: message.role, text,
+        contentReady: (!submission.text || !!text) && parts.filter(part => part.type === "file" && part.mime.startsWith("image/")).length >= submission.images }
+    }))
+  })
   createEffect(() => {
     const visible = echo()
     if (visible && stick) queueMicrotask(pin)
@@ -543,7 +643,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => {
     const feed = mail()
     const next = nextHandoff()
-    return mailRows(messages(), feed, previous, {
+    const pending = echo() ? composer.state.normalSubmission?.messageID : undefined
+    return mailRows(pending ? messages().filter(message => message.id !== pending) : messages(), feed, previous, {
       sessionID,
       lane: location()?.lane,
       from: session()?.time.created ?? Number.POSITIVE_INFINITY,
@@ -607,19 +708,25 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  // Mail tool rows (Laptop2627) read receipts on the session's own host: another Work host's session reads that host's
+  // dashboard, and is reread when the session's status changes there; this host's on its mail revision.
+  // A host whose dashboard does not answer JSON here (an older or refusing listener) has no receipts to show, not an error.
+  const [hostEditspaces] = createResource(() => remote ? sessionHost.id : undefined, (host) => fetch(`${hostPrefix(host)}/es/api/editspaces`, { credentials: "include" })
+    .then((response) => response.ok && response.headers.get("content-type")?.includes("application/json")
+      ? response.json().then((body: { editspaces?: { name: string; root: string }[] }) => Array.isArray(body?.editspaces) ? body as { editspaces: { name: string; root: string }[] } : undefined, () => undefined)
+      : undefined, () => undefined))
+  const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", host: remote ? sessionHost.id : undefined, directory, session: sessionID,
+    editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
+  // Incoming mail this session's agent has not been shown (DD #414): its rows say so, one bar offers Wake now.
+  const unreadMail = createMemo(() => mail()?.messages.filter((message) => message.direction === "received" && mailUnread(message.deliveries, sessionID, message.receipt)).length ?? 0)
+  const mailWake = createMailWake({ editspace: () => location()?.name, session: sessionID, unread: unreadMail, revision: mailRevision })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
   const { markViewed, refetchArchived } = dashboard
-  // Unread state is this page's host's; another host's same session ID must not clear it.
-  onMount(() => { if (!remote) markViewed(sessionID, true) })
-  createEffect(() => {
-    messages()
-    status()
-    if (!remote) markViewed(sessionID)
-  })
+
 
   // busy with nothing visibly moving (no running tool, no streaming part):
   // the model is thinking or the first token hasn't landed — show the busy dot
@@ -642,6 +749,22 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
 
   const busy = () => !live.error() && (status() === "busy" || status() === "retry")
+  // Quiet turns (Front desk chat only): folded, and never unread (quiet-turns.ts). Declared after busy(): the memo
+  // runs at creation and reads it.
+  const quiet = createMemo(() => props.quiet ? quietTurns(messages(), (id) => live.data.part[id] ?? [], !busy()) : new Map())
+  const [quietOpen, setQuietOpen] = createSignal<ReadonlySet<string>>(new Set())
+  // Unread state is this page's host's; another host's same session ID must not clear it. A hidden Front desk chat
+  // marks itself viewed only while nothing with text is new, so a quiet turn never leaves it unread and a reply does.
+  onMount(() => { if (!remote && !props.hidden?.()) markViewed(sessionID, true) })
+  let audibleSeen = 0
+  createEffect(() => {
+    messages()
+    status()
+    const audible = props.quiet ? lastAudible(messages(), quiet()) : 0
+    if (remote) return
+    if (!props.hidden?.()) { audibleSeen = audible; return markViewed(sessionID) }
+    if (props.quiet && audible <= audibleSeen) markViewed(sessionID)
+  })
   // Daemon trouble shares one status slot, shown only once it persists: brief
   // stalls change nothing visible and cannot stack banners. Auxiliary dashboard
   // reads (mail, handoffs) report inside their own panels instead.
@@ -674,7 +797,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return "idle"
   })
   // The open session's work line is the view's one animated busy indicator (CSS halo, compositor-only).
-  const WorkSpinner = () => <span class="busy-dot" data-animate aria-hidden="true" />
   const briefInput = createMemo(() => {
     const current = messages().slice(Math.max(0, messages().findLastIndex((message) => message.role === "user")))
     const tools = current.flatMap((message) => message.role !== "assistant" ? [] :
@@ -711,23 +833,24 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   // The work line already animates while busy, so the transcript tail shows the same dot static.
-  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" data-animate aria-hidden="true" /></div>
+  const Thinking = () => <div class="thinking" title="Waiting for the agent's first output"><span class="session-spinner" role="img" aria-label="Thinking" /></div>
+  // Status words live in the dot's label; only what the person may act on stays as text (a reply, a failure).
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
-      <Show when={workState() === "working" || workState() === "idle"} fallback={<>
-        <Show when={workState() === "retry"}><WorkSpinner /></Show>
-        <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
-          `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : workState() === "stale"
-          ? live.loaded() ? "Waiting for daemon — showing saved transcript" : "Waiting for daemon"
-          : live.loaded() ? "Reconnecting — showing saved transcript" : "Reconnecting — activity unavailable"}</span>
+      <span class={`dot ${chatDot(workState()).dot}`} data-chat-dot={chatDot(workState()).dot} role="img"
+        aria-label={chatDot(workState()).label} title={[chatDot(workState()).label, workState() === "stale" || workState() === "disconnected"
+          ? live.loaded() ? "showing saved transcript" : "" : ""].filter(Boolean).join(": ")} />
+      <Show when={workState() === "working" || workState() === "retry" || workState() === "idle"} fallback={<>
+        <Show when={workState() === "waiting" || workState() === "failed"}>
+          <span>{workState() === "waiting" ? "Waiting for your reply" : `Session failed — see error ${inlineError() ? "in conversation" : "above"}`}</span>
+        </Show>
         <Show when={workState() === "failed" && !remote}><FailureRetry sessionID={sessionID} /></Show>
       </>}>
-        <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
-        <ActivityBriefView input={briefInput()} />
+        <Show when={!["Working", "Idle", "Activity unknown"].includes(activityBrief(briefInput(), Date.now()).text)}><ActivityBriefView input={briefInput()} /></Show>
       </Show>
       <Show when={workState() === "disconnected"}>
         <button disabled={live.loading()} onClick={() => {
-          void live.load().catch(() => {})
+          void live.reconnect()?.catch(() => {})
           void activity.refreshDirectory(directory, true)
         }}>reconnect</button>
       </Show>
@@ -746,7 +869,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const [aborting, setAborting] = createSignal(false)
   const [nudgePhase, setNudgePhase] = createSignal<"stopping" | "resuming">()
   const abort = async () => {
-    if (aborting() || nudgePhase() || sending() || !busy()) return
+    // A read-only host is never stopped from this page (Ctrl+C Ctrl+C included).
+    if (sessionHost.readOnly || aborting() || nudgePhase() || sending() || !busy()) return
     setAborting(true)
     try {
       await oc.abort(sessionID, directory)
@@ -757,17 +881,28 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     }
   }
 
-  // Esc Esc within 400ms in normal mode aborts; the insert->normal Escape
-  // doesn't count (only taps landing while already in normal mode do)
+  // Ctrl+C twice within 400 ms stops the busy turn of this page's session (on its own
+  // host). A Ctrl+C with selected text is a copy and resets the count; repeats, IME and
+  // other modifiers never count. Esc only leaves modes and closes things.
   let lastEsc = 0
-  const escTap = () => {
+  const stopTap = (e: KeyboardEvent) => {
+    if (!matchShortcut(e, "stopTurn") || e.repeat) return false
+    // An open modal (What's new, image viewer, shortcut help) owns the keyboard.
+    if (document.querySelector("dialog[open], [role='dialog'][aria-modal='true']")) return false
+    if (hasSelectedText(e.target)) {
+      lastEsc = 0
+      return false
+    }
+    if (!busy() || sessionHost.readOnly) return false
+    e.preventDefault()
     const now = Date.now()
     if (now - lastEsc < 400) {
       lastEsc = 0
       abort()
-      return
+      return true
     }
     lastEsc = now
+    return true
   }
 
   const [forking, setForking] = createSignal(false)
@@ -827,7 +962,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // agent, model, wall-clock (user prompt -> completed), and an interrupted
   // marker for aborted turns. In-flight turns are omitted until they complete
   // or get aborted.
-  type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean }
+  // Times are kept apart: when the turn's prompt arrived (started), when this final reply began (replied) and when the
+  // turn completed or was interrupted (ended). A time Core did not record is omitted, never substituted.
+  type TurnState = "completed" | "interrupted" | "error" | "cancelled"
+  type TurnSummary = { messageID: string; agent?: string; providerID?: string; modelID?: string; duration?: number; state: TurnState
+    started?: number; replied?: number; ended?: number; copyPartID?: string; copyMessageID?: string; copyText?: string; endsInText: boolean }
   // Parent prompt IDs of finished agent turns (see completedTurns). Controls the
   // footer and which tool calls may coalesce, so live turns stay fully visible.
   const turnsDone = createMemo(() => {
@@ -843,26 +982,57 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const out = new Map<string, TurnSummary>()
     let turnStart: number | undefined
     let last: any | undefined
-    const flush = () => {
-      if (last && turnsDone().has(last.parentID)) {
-        const end = last.time?.completed
-        out.set(last.id, {
-          agent: last.agent ?? last.mode,
-          providerID: last.providerID,
-          modelID: last.modelID,
-          duration: turnStart !== undefined && end ? end - turnStart : undefined,
-          interrupted: last.error?.name === "MessageAbortedError",
-        })
+    let steps: any[] = []
+    // The turn's last text (Copy) and what is visibly last (a text vs a tool/reasoning/no output). Copy is one per
+    // turn, on the final message; the footer joins it there when the turn ends in agent text.
+    const derive = (message: any) => {
+      let copyPartID: string | undefined
+      let copyMessageID: string | undefined
+      let copyText: string | undefined
+      let lastVisible: any | undefined
+      for (const step of steps) for (const part of live.data.part[step.id] ?? []) {
+        if (part.type === "text" && part.text?.trim()) { copyPartID = part.id; copyMessageID = step.id; copyText = part.text }
+        if (renderable(part, true)) lastVisible = part
       }
-      last = undefined
+      const end = message.time?.completed
+      const state: TurnState = message.error?.name === "MessageAbortedError" ? "interrupted"
+        : message.error || message.finish === "error" ? "error"
+        : typeof end === "number" ? "completed"
+        : "cancelled"
+      out.set(message.id, {
+        messageID: message.id,
+        agent: message.agent ?? message.mode,
+        providerID: message.providerID,
+        modelID: message.modelID,
+        duration: turnStart !== undefined && end ? end - turnStart : undefined,
+        state,
+        started: turnStart,
+        replied: typeof message.time?.created === "number" ? message.time.created : undefined,
+        ended: typeof end === "number" ? end : undefined,
+        ...(copyPartID ? { copyPartID } : {}),
+        ...(copyMessageID ? { copyMessageID } : {}),
+        ...(copyText ? { copyText } : {}),
+        endsInText: lastVisible?.type === "text",
+      })
     }
-    for (const m of messages()) {
+    const flush = () => {
+      if (last && turnsDone().has(last.parentID)) derive(last)
+      last = undefined
+      steps = []
+    }
+    // Message IDs are time-ordered in Core, but a fixture or an imported transcript may not be; sort by the record's
+    // own created time so a user prompt always precedes its assistant steps.
+    const ordered = [...messages()].sort((a, b) => ((a as any).time?.created ?? 0) - ((b as any).time?.created ?? 0)
+      || a.id.localeCompare(b.id))
+    for (const m of ordered) {
       const time = (m as any).time ?? {}
       if (m.role === "user") {
         flush()
         turnStart = time.created
-      } else if (time.completed || (m as any).error) {
+      } else {
+        // The final assistant step is the turn's footer even when it never completed (a cancelled end).
         last = m
+        steps.push(m)
       }
     }
     flush()
@@ -882,6 +1052,48 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (s < 60) return `${s}s`
     if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
     return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+  }
+
+  // One quiet footer per turn: completion time, agent, model, duration, and a state icon only when the turn did not
+  // finish cleanly. It rides the Copy row (styled like the user message's hover meta) when the turn ends in agent
+  // text; a tool-only or silent end keeps its own always-visible row. No success mark: only interrupted/error/cancelled
+  // are marked, with an icon and an accessible label.
+  const TurnStateIcon = (props: { state: Exclude<TurnState, "completed"> }) => {
+    const icon = () => props.state === "interrupted" ? "stop" : props.state === "error" ? "warning" : "close"
+    const label = () => props.state === "interrupted" ? "Interrupted" : props.state === "error" ? "Error" : "Cancelled"
+    return <span class="turn-state" data-state={props.state} role="img" aria-label={label()} title={label()}>
+      <Icon name={icon()} size="small" />
+    </span>
+  }
+  const TurnFooter = (props: { summary: TurnSummary; copy?: string; standalone?: boolean }) => {
+    const [copied, setCopied] = createSignal(false)
+    const copy = async () => {
+      if (!props.copy) return
+      const ok = await navigator.clipboard?.writeText(props.copy).then(() => true, () => false)
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    const state = () => props.summary.state
+    const endedLabel = () => state() === "interrupted" ? "interrupted" : state() === "error" ? "error" : state() === "cancelled" ? "cancelled" : ""
+    const exact = () => [props.summary.started && `Turn started ${exactTime(props.summary.started)}`,
+      props.summary.replied && `reply started ${exactTime(props.summary.replied)}`,
+      props.summary.ended && `${endedLabel() || "completed"} ${exactTime(props.summary.ended)}`].filter(Boolean).join("; ")
+    return <span class="turn-summary" data-state={state()} data-standalone={props.standalone ? "" : undefined}>
+      <Show when={state() === "completed" ? undefined : state() as Exclude<TurnState, "completed">}>{value => <TurnStateIcon state={value()} />}</Show>
+      <Show when={props.copy}><button type="button" class="turn-copy" aria-label={copied() ? "Copied" : "Copy response"}
+        title={copied() ? "Copied" : "Copy response"} onMouseDown={event => event.preventDefault()} onClick={() => void copy()}>
+        <Icon name={copied() ? "check" : "copy"} size="small" /></button></Show>
+      <span class="turn-meta" dir="auto">
+        <Show when={props.summary.ended ?? props.summary.replied}>{(at) =>
+          <><time class="turn-time" dateTime={new Date(at()).toISOString()} title={exact()} aria-label={exact()}>
+            {props.summary.ended ? `${endedLabel()}${endedLabel() ? " " : ""}` : "replied "}{clockTime(at())} · {ago(at())}</time>{" · "}</>}</Show>
+        <span class="agent">{titlecase(props.summary.agent)}</span>
+        {" · "}
+        {modelName(props.summary.providerID, props.summary.modelID)}
+        <Show when={props.summary.duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
+      </span>
+    </span>
   }
 
   const activeDraft = composer.visibleDraft
@@ -993,17 +1205,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     composer.observeBusy(busy() || statusUnknown())
     stick = true
     queueMicrotask(pin)
-    const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
+    // Steer is the one default send; Queue and Aside are chosen explicitly from More send options.
+    const chosen = action ?? "steer"
     // Chips always go to the composer: it attaches them or refuses the send with a reason (never sends without
     // them). Generated page context (props.context) rides only where it can be attached and fits (input-context.ts).
     const chips = contextParts()
     const plain = chosen === "steer" && !composer.state.busy
-    const context = sendContext({ input: !plain, attaches: composer.contextAttaches(chosen), generated: props.context?.() ?? [], chips })
+    const context = sendContext({ input: !plain, attaches: composer.contextAttaches(chosen), generated: props.context?.({ input: !plain }) ?? [], chips })
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
     // A plain send is accepted by its message; a steer or queue once its input is admitted (no admission left
     // pending or unknown, and no refusal).
     const accepted = plain ? composer.state.normalSubmission?.status === "accepted" : !composer.state.admission && !composer.state.error
-    if (context.length) props.onSent?.(context, accepted)
+    if (context.length) props.onSent?.(context, accepted, { input: !plain })
     if (chips.length && accepted) setContextRefs([])
   }
 
@@ -1035,6 +1248,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   let transcriptEl: HTMLDivElement | undefined
+  let pageEl: HTMLElement | undefined
+  markAncestor(() => pageEl, ".content", "session-page", true)
   let inner: HTMLDivElement | undefined
   let promptEl: HTMLTextAreaElement | undefined
   const [findOpen, setFindOpen] = createSignal(false)
@@ -1311,24 +1526,39 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   const focusInsert = () => vim.setMode("insert")
+  const [promptFocused, setPromptFocused] = createSignal(false)
+  // Cmd/Ctrl+M opens (or closes) the composer's More send options while the session is
+  // busy and focuses its first choice; Esc closes it and returns focus to the composer.
   const cycleMode = (e: KeyboardEvent) => {
-    if (!matchShortcut(e, "cycleTarget")) return false
+    if (!matchShortcut(e, "moreSendOptions")) return false
     e.preventDefault()
     e.stopPropagation()
-    if (!composer.state.busy) return true
     if (e.repeat) return true
+    const more = document.querySelector<HTMLButtonElement>(".prompt-box:not([inert]) button.direct-more")
+    if (!more || more.disabled) return true
     lastEsc = 0
-    const inputMode = vim.mode()
-    composer.selectTarget(composer.state.keyboardTarget === "steer" ? "queue" : composer.state.keyboardTarget === "queue" ? "aside" : "steer")
-    if (e.target instanceof HTMLSelectElement && e.target.disabled) {
-      const editor = promptEl
-      editor?.focus()
-      vim.setMode(inputMode)
-      editor?.setSelectionRange(...activeDraft().selection)
-      vim.refresh(editor)
+    const opening = more.getAttribute("aria-expanded") !== "true"
+    more.click()
+    if (!opening) {
+      promptEl?.focus()
+      return true
     }
+    queueMicrotask(() => {
+      const menu = document.querySelector<HTMLElement>(".prompt-box:not([inert]) .direct-more-menu")
+      menu?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus()
+      // The composer closes the menu on Esc; put focus back in the editor afterwards.
+      const back = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return
+        document.removeEventListener("keydown", back, true)
+        // The menu may already be gone (focus fell to body) by the time this listener runs.
+        const active = document.activeElement
+        if (!active || active === document.body || menu?.contains(active)) queueMicrotask(() => promptEl?.focus())
+      }
+      document.addEventListener("keydown", back, true)
+    })
     return true
   }
+
 
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
@@ -1429,7 +1659,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       activatePrimary()
       return
     }
-    if (e.key === "Escape" && vim.mode() === "normal" && composer.state.keyboardTarget !== "aside") escTap()
+    if (composer.state.keyboardTarget !== "aside" && stopTap(e)) return
     // D6: while typing, Ctrl+H/D/U/N/P keep their text-editing meaning (macOS delete,
     // forward delete, line moves). Stop propagation so the window-level panel and
     // nav handlers skip them too; Ctrl+E stays the float-editor key.
@@ -1438,7 +1668,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       return
     }
     if (navKeys(e)) return
+    // Esc ladder: Insert -> Normal -> the transcript, keeping the draft (`i` comes back).
+    const leave = e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && vim.mode() === "normal" && !floating()
     vim.handleKeyDown(e)
+    if (leave) leaveComposer(pageEl ?? null)
   }
 
   // global keys when focus is outside the prompt: nav + mode entry
@@ -1447,7 +1680,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (dialog.active || e.defaultPrevented) return
       const target = e.target as HTMLElement
       if (target.closest(".prompt-box") && cycleMode(e)) return
+      if (!target.closest(".prompt-box") && stopTap(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls], .generated-input")) return
+      // Beside Porter two session views listen; only the one holding focus (or the page's own, from nowhere) acts.
+      if (!ownsKey(pageEl, target)) return
       if (navKeys(e)) return
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
         e.preventDefault()
@@ -1455,7 +1691,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         return
       }
       if (e.key === "Escape") {
-        if (vim.mode() === "normal") escTap()
         vim.setMode("normal")
         return
       }
@@ -1569,11 +1804,32 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const contextHref = (ref: ContextRef) => {
     if (ref.kind === "session") return sessionHref(ref.id, ref.directory)
     // Same keys the desk opens with `/?item=` and `/?surface=`.
-    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`attention:${ref.editspace}:${ref.id}`)}`
+    // Another Work host's decision opens through that host's desk key.
+    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`${ref.host !== contextHost ? `${ref.host}~` : ""}attention:${ref.editspace}:${ref.id}`)}`
     if (ref.kind === "surface") return `/?surface=${encodeURIComponent(ref.id)}`
     const owner = sessionRows().find((row) => row.id === ref.owner)
     return owner ? sessionHref(owner.id, owner.directory) : "/"
   }
+  // Ask about this (ATTN-17): the chip joins the current draft, its label appended after the text already there, and
+  // the caret lands after it. Nothing is sent.
+  createEffect(() => {
+    const ref = props.incoming?.()
+    if (!ref) return
+    untrack(() => {
+      props.onIncoming?.()
+      const known = contextRefs().some((item) => contextKey(item) === contextKey(ref))
+      if (!known && contextRefs().length >= MAX_CONTEXT) return setContextNote(`At most ${MAX_CONTEXT} context items per message. Remove one to add another.`)
+      if (!known) setContextRefs([...contextRefs(), ref])
+      const next = appendContextLabel(draft(), ref.label)
+      setDraft(next.text)
+      requestAnimationFrame(() => {
+        if (!promptEl) return
+        promptEl.focus({ preventScroll: true })
+        promptEl.setSelectionRange(next.caret, next.caret)
+        saveSelection(promptEl)
+      })
+    })
+  })
   // Absolute so the receiving agent can re-fetch from the attaching host.
   const contextParts = () => contextRefs().map((ref) => contextPart(ref, linkUrl(new URL(contextHref(ref), window.location.origin).href), Date.now()))
 
@@ -1668,8 +1924,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         onCompositionEnd={() => { composing = false; setQuery(undefined) }}
         onSelect={(e) => { saveSelection(e.currentTarget); if (query() && (e.currentTarget.selectionStart !== e.currentTarget.selectionEnd || !mentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))) setQuery(undefined) }}
         onKeyUp={(e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) update(e.currentTarget, e.isComposing); else saveSelection(e.currentTarget) }}
-        onFocus={focusInsert} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
-        onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined) }} />
+        onFocus={() => { focusInsert(); setPromptFocused(true) }} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
+        onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined); setPromptFocused(false) }} />
+      {/* Which mode the keys go to, while they go here. */}
+      <Show when={promptFocused()}><span class="kbd-mode" data-mode={vim.mode()} aria-hidden="true">{vim.mode() === "normal" ? "NORMAL" : "INSERT"}</span></Show>
       <SessionChips target={target()} text={draft()} selection={activeDraft().selection} />
       <Show when={query() && vim.mode() !== "normal" && !composing}><ContextPicker groups={groups()} selected={selected()} select={setSelected} add={insert} /></Show>
       <Show when={floating()}><RelativeLines target={promptEl!} value={draft()} /></Show>
@@ -1718,62 +1976,49 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         <Show when={remote || (ownedLane() && session() && !session()!.parentID)}><SelfHandoffButton handoff={selfHandoff} gate={selfHandoffGate()} /></Show>
       </>}
       moreActions={remote ? undefined : <>
-        <button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+        {/* The Front Desk is one long-lived conversation: it offers no Fork, Archive or Delete (Restore stays). */}
+        <Show when={!desk()}><button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           <Glyph name="repo-forked" /><span class="action-label">{forking() ? "Forking…" : "Fork"}</span>
-        </button>
+        </button></Show>
         <Show when={ownedLane()}><button class="act-handoff" title="Hand off this lane" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>
           <Glyph name="arrow-switch" /><span class="action-label">Hand off</span></button></Show>
         <Show when={!session()?.time?.archived} fallback={<>
           <span class="archived-chip">Archived</span>
           <button title="Restore this session" onClick={() => setArchived(false)}><Glyph name="archive" /><span class="action-label">Restore</span></button>
         </>}>
-          <button title="Archive this session" disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" /><span class="action-label">Archive</span></button>
+          <Show when={!desk()}><button title="Archive this session" disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" /><span class="action-label">Archive</span></button></Show>
         </Show>
-        <button class="danger" title="Delete this session" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" /><span class="action-label">Delete</span></button>
+        <Show when={!desk()}><button class="danger" title="Delete this session" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" /><span class="action-label">Delete</span></button></Show>
       </>}>
       {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
-      <Show when={changingModel()} fallback={<>
+      <>
         {/* The model name is the picker's button; the small glyph marks it as changeable. */}
         {/* A model name is never a ticket key, even when it looks like one. */}
         <button class="direct-change-model composer-model" ref={modelButton} data-ticket-refs="off"
           disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
           aria-label={`Change model, current ${shownModelName()}`}
           title={`${composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"} · ${shownModel() ? `${shownModel()!.providerID} · ${shownModel()!.modelID}` : "default"} · Change model`}
+          aria-haspopup="dialog" aria-expanded={changingModel()}
           onClick={() => setChangingModel(true)}>
           <bdi class="direct-model-name">{shownModelName()}</bdi>
           <Glyph name="arrow-switch" size={12} />
         </button>
-      </>}>
-        <select class="model-select" ref={(el) => queueMicrotask(() => el.focus())}
-          aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
-          title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns"}
-          value={pickerModel() ? `${pickerModel()!.providerID}\u0000${pickerModel()!.modelID}` : ""}
-          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeModelPicker() } }}
-          onChange={(e) => {
-            const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-            const model = providerID && modelID ? { providerID, modelID } : null
+      </>
+      <Show when={changingModel()}>
+        <ModelPicker providers={providers()?.providers ?? []} selected={pickerModel()} loading={providers.loading}
+          label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
+          inheritedLabel={composer.state.visibleBuffer === "aside" ? "Use session model" : undefined}
+          onClose={closeModelPicker} onChoose={(model) => {
             closeModelPicker()
             if (composer.state.visibleBuffer === "aside") return composer.setVisibleModel(model)
             if (!model) return
-            const selected = providers()?.providers.find((provider) => provider.id === providerID)?.models?.[modelID]
+            const selected = providers()?.providers.find((provider) => provider.id === model.providerID)?.models?.[model.modelID]
             if (composer.state.task.images.length && selected?.capabilities?.input?.image === false) {
               setError("Selected model does not support image input. Images and session model were not changed.")
               return
             }
             void composer.chooseSessionModel(model)
-          }}>
-          <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!pickerModel()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose model"}</option>
-          <For each={providers()?.providers ?? []}>
-            {(prov) => (
-              <optgroup label={prov.id}>
-                <For each={Object.keys(prov.models ?? {})}>
-                  {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={pickerModel()?.providerID === prov.id && pickerModel()?.modelID === mid}>{mid}</option>}
-                </For>
-              </optgroup>
-            )}
-          </For>
-        </select>
-        <button onClick={closeModelPicker}>Cancel</button>
+          }} />
       </Show>
       <Show when={composer.state.visibleBuffer === "aside" && composer.state.aside.model}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
       <Show when={composer.state.modelSelection}>{(selection) => <span class="dim" role="status">{selection().status === "unknown" ? "Model change unconfirmed" : "Confirming model…"}</span>}</Show>
@@ -1819,6 +2064,52 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return next
   })
   const messageByID = createMemo(() => new Map(messages().map((message) => [message.id, message] as const)))
+  // A promoted input stays as a Delivered bubble until its user message is in this transcript (DD #343): the bubble
+  // would otherwise retire on the receipt alone while a dropped host event leaves the message unrendered. Only inputs
+  // this page saw pending count, so older terminal receipts never reappear. After 5 s the message is read by id from
+  // the session's own host and applied; if Core has no such message the bubble stays (uncertain, never dropped).
+  const seenPending = new Set<string>()
+  createEffect(() => composer.state.receipts.forEach((receipt) => { if (receipt.state === "pending") seenPending.add(receipt.requestID) }))
+  const inTranscript = (messageID: string) => !!live.data.message[sessionID]?.some((message) => message.id === messageID)
+  const deliveredWaiting = createMemo(() => composer.state.receipts.filter((receipt) => {
+    const messageID = (receipt as { messageID?: unknown }).messageID
+    return receipt.state !== "pending" && receipt.state !== "cancelled" && seenPending.has(receipt.requestID) && receipt.source?.type !== "editspace-mail"
+      && typeof messageID === "string" && !inTranscript(messageID)
+  }))
+  // A delivery row (admission, pending receipt, the normal send, a delivered bubble) lives at the end of the
+  // transcript. When one appears while the reader is at the bottom, pin in this render rather than waiting for a
+  // ResizeObserver callback: a Steer can add its row and shrink the composer in the same frame, and a frame's gap
+  // must not leave the reader short of the newest row.
+  let outgoingRows = -1
+  createEffect(() => {
+    const count = composer.state.receipts.length + composer.state.recoveries.length
+      + (composer.state.admission ? 1 : 0) + (composer.state.normalSubmission ? 1 : 0) + deliveredWaiting().length
+    if (outgoingRows !== -1 && count !== outgoingRows && stick) pin()
+    outgoingRows = count
+  })
+  const reading = new Set<string>()
+  const readTimers = new Set<ReturnType<typeof setTimeout>>()
+  onCleanup(() => readTimers.forEach(clearTimeout))
+  createEffect(() => deliveredWaiting().forEach((receipt) => {
+    const messageID = (receipt as { messageID?: string }).messageID!
+    if (reading.has(messageID)) return
+    reading.add(messageID)
+    const timer = setTimeout(async () => {
+      if (inTranscript(messageID)) return
+      const found = await oc.message(sessionID, directory, messageID).catch(() => undefined)
+      if (!found || inTranscript(messageID)) return
+      live.apply({ type: "message.updated", properties: { info: found.info } })
+      found.parts.forEach((part) => live.apply({ type: "message.part.updated", properties: { part } }))
+    }, 5000)
+    readTimers.add(timer)
+  }))
+  // A promoted input's promotion time, from its receipt (Core keeps the last terminal receipts).
+  const promotedAt = (messageID: string) => {
+    const receipt = composer.state.receipts.find((item) => "messageID" in item && item.messageID === messageID) as { timePromoted?: unknown } | undefined
+    return typeof receipt?.timePromoted === "number" ? receipt.timePromoted : undefined
+  }
+  // This session's current turn start as Core recorded it (Session.time.turn); undefined from a Core without it.
+  const turnStarted = () => { const value = (session()?.time as { turn?: { started?: unknown } } | undefined)?.turn?.started; return typeof value === "number" ? value : undefined }
   const promptIDs = createMemo(() => new Set(timeline().flatMap((row) =>
     row.type === "transcript" && isUserPrompt(row.message, live.data.part[row.message.id] ?? []) ? [row.message.id] : [])))
   createEffect(() => { promptIDs(); schedulePromptPosition() })
@@ -1844,7 +2135,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   return (
     <SessionHostProvider value={sessionHost}>
-    <main class="session-page" classList={{ "finding-transcript": findOpen() }} data-host={sessionHost.id}>
+    <main ref={pageEl} class="session-page" classList={{ "finding-transcript": findOpen() }} data-host={sessionHost.id}>
       <div class="session-main">
         {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
         <AppHeader inline={props.embedded}>
@@ -1854,7 +2145,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             void refetch()
           }} />
           <Show when={sessionHost.id}><span class="session-host" title={`On ${sessionHost.label}`}><HostGlyph host={sessionHost.id!} /> <bdi dir="auto">{sessionHost.label}</bdi></span></Show>
-          <span class="dim session-state" data-state={workState()}>{workState() === "working" ? "busy" : workState()}</span>
+          <Show when={sessionHost.readOnly}><span class="dim session-read-only" data-read-only>read only</span></Show>
+          {/* The sidebar's round dot; the state word is its label only (chat-activity). */}
+          <span class={`session-state dot ${chatDot(workState()).dot}`} data-state={workState()} role="img"
+            aria-label={workState() === "working" ? "busy" : workState()} title={workState() === "working" ? "busy" : workState()} />
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (
@@ -1949,7 +2243,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
         <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} steps={(id) => live.data.step[id] ?? []} status={status}
           pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
-        <div class="transcript" ref={transcriptEl}>
+        <div class="transcript" ref={transcriptEl} tabIndex={-1} role="region" aria-label="Transcript" data-session-host={sessionHost.id ?? undefined}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
             // Only a standalone chip's own disclosure counts (an icon chip's summary, or a session-ui chip's trigger);
@@ -1974,7 +2268,30 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               <FindExcerpt hit={hit()} />
               <span class="dim">Exact source excerpt. Earlier history is not added to the reader.</span>
             </div>}</Show>
-            <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
+            <Show when={!earlierLeft() && !segments[shownIDs()[0] ?? ""]?.hasOlder() && chain().broken && !live.hasOlder()}>
+              <div class="earlier-session-status" role="note">Earlier history isn't linked</div>
+            </Show>
+            <Show when={!live.hasOlder() && (earlierLeft() || segments[shownIDs()[0] ?? ""]?.hasOlder())}>
+              <button class="transcript-older" disabled={earlierLoading} onClick={() => void loadEarlierSession()}>Load earlier session</button>
+            </Show>
+            <For each={shownIDs()}>{(id) => {
+              const index = () => chain().links.findIndex((item) => item.session === id)
+              const link = chain().links[index()]!
+              const dir = link.directory ?? sessionDir(id)
+              const href = link.host ? `${sessionHref(id, dir)}&host=${encodeURIComponent(link.host.id)}` : hrefFor(id, dir)
+              return <>
+                <Show when={chain().links[index() + 1]}>{(prior) => <HandoffRule predecessor={prior().session} successor={id}
+                  label={segments[prior().session]?.title() ?? sessionLabel(prior().session)} href={earlierHref(prior())} reason={prior().reason}
+                  at={segments[id]?.created()} />}</Show>
+                <EarlierSession link={link} directory={dir} host={link.host ?? sessionHost} href={href} hostLabel={link.host?.label}
+                  renderTools={renderTools} register={(control) => setSegments(id, control)} />
+              </>
+            }}</For>
+            <Show when={chain().links[0]}>{(prior) => <HandoffRule previous predecessor={prior().session} successor={sessionID}
+              label={segments[prior().session]?.title() ?? sessionLabel(prior().session)} href={earlierHref(prior())}
+              reason={prior().reason ?? predecessor()?.reason} at={session()?.time.created}
+              skipped={predecessor()?.kickoff === "skipped" ? predecessor()?.context : undefined} />}</Show>
+            <Show when={!chain().links.length && predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
               Previous session: <A href={hrefFor(edge().predecessor, sessionDir(edge().predecessor))}><bdi dir="auto">{sessionLabel(edge().predecessor)}</bdi></A>
               {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
               <Show when={edge().reason}>{(reason) => <> · <bdi dir="auto">{reason()}</bdi></>}</Show>
@@ -2005,23 +2322,51 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             {/* Tool rows read the mail they sent from these already-loaded records (Laptop2627); no extra request. */}
-            <MailRecords.Provider value={(id) => mailRecords().get(id)}>
+            <MailRecords.Provider value={receiptRecords}>
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
-              {(row) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
+              {(row, index) => {
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} wakeLine={mailWake.line} />
                 const m = row.message
+                // The final step's footer; a text-ending footer may belong to an earlier step when the last step is empty.
+                const final = () => turnSummaries().get(m.id)
+                const summary = () => {
+                  if (final()?.endsInText) return final()
+                  return [...turnSummaries().values()].find(value => value.endsInText && value.copyMessageID === m.id)
+                }
+                const member = () => quiet().get(m.id)
+                const folded = () => { const value = member(); return !!value && !quietOpen().has(value.group) }
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
                   [], { equals: sameSegments })
                 const ownHit = () => findHit()?.messageID === m.id && !toolRuns().byPart.has(findHit()!.partID) ? findHit() : undefined
-                return (
+                return (<>
+                <Show when={member()?.first}>{(_) => {
+                  const value = () => member()!
+                  return <button type="button" class="quiet-turns" data-quiet-group={value().group} aria-expanded={!folded()}
+                    onClick={() => setQuietOpen((open) => { const next = new Set(open); if (!next.delete(value().group)) next.add(value().group); return next })}>
+                    <span class="quiet-turns-disclosure" aria-hidden="true">›</span>
+                    <span>{props.quiet} handled {value().count} update{value().count === 1 ? "" : "s"}</span>
+                  </button>
+                }}</Show>
+                <Show when={!folded()}>
                 <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}
-                  data-anchored={anchored().has(m.id) ? "true" : undefined}>
+                  data-anchored={anchored().has(m.id) ? "true" : undefined} data-quiet={member() ? "" : undefined}
+                  onPointerUp={(event) => {
+                    // Touch has no hover: one tap reveals the turn's Copy row.
+                    if (event.pointerType === "touch" && m.role === "assistant") (event.currentTarget as HTMLElement).dataset.touchReveal = ""
+                  }}>
                   <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>
-                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
-                    segments={segments()} renderRun={renderRun} />}>
+                  <Show when={m.role === "user"} fallback={<>
+                    {/* Porter's replies start with its avatar, once per turn (the desk conversation only). */}
+                    <Show when={desk() && DESK.avatar && (() => { const previous = visibleTimeline()[index() - 1]; return !(previous && previous.type !== "mail" && (previous.message as { role?: string }).role === "assistant") })()}>
+                      <img class="desk-reply-avatar" src={DESK.avatar} alt={DESK.name} width="20" height="20" />
+                    </Show>
+                    <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
+                    segments={segments()} renderRun={renderRun}
+                    showAssistantCopyPartID={summary()?.endsInText ? summary()?.copyPartID ?? null : null}
+                    turnFooter={summary()?.endsInText ? <TurnFooter summary={summary()!} /> : undefined} /></>}>
                     <Show when={wakeMarker(m, messages(), wakeEvents() ?? new Map())}>{(marker) =>
                       <div class="wake-marker" data-state={marker().state} role="note" title={marker().title}>
                         <span>{marker().label}</span>
@@ -2035,6 +2380,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
                         mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} mailName={mailName} />
+                      {/* What the prompt was looking at or @-referenced, under the bubble (the agent's text is unchanged).
+                          DOUBLE-TICK: delivered at promotion (the receipt's time, else the message's), read after a later
+                          turn start; with context it shares the last line's row instead of adding one. */}
+                      <ContextLines parts={live.data.part[m.id] ?? []} tick={promptIDs().has(m.id) ? () =>
+                        <DeliveredTick turnStarted={turnStarted()} promotedAt={promotedAt(m.id) ?? m.time.created} row={false} /> : undefined} />
                       <Show when={!remote}><button
                         class="fork-here"
                         title="fork: new session with the history before this message"
@@ -2046,21 +2396,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                     </div>
                     <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} name={mailName} />}</Show>
                   </Show>
-                  <Show when={turnSummaries().get(m.id)}>
-                    {(s) => (
-                      <div class="turn-summary" classList={{ interrupted: s().interrupted }}>
-                        <span class="marker">▣</span> <span class="agent">{titlecase(s().agent)}</span>
-                        {" · "}
-                        {modelName(s().providerID, s().modelID)}
-                        <Show when={s().duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
-                        <Show when={s().interrupted}> · interrupted</Show>
-                      </div>
-                    )}
+                  {/* A tool-only or silent end has no last text to carry the Copy row: the footer stays visible. */}
+                  <Show when={final() && !final()!.endsInText ? final() : undefined}>
+                    {(s) => <TurnFooter summary={s()} copy={s().copyText} standalone />}
                   </Show>
                   <For each={restartMarkers(m, messages(), status() !== "idle")}>
                     {(marker) => <div class="restart-marker" data-state={marker.state} role="note">{marker.label}</div>}
                   </For>
                 </div>
+                </Show>
+                </>
                 )
               }}
             </For>
@@ -2089,7 +2434,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 <Show when={recoveryError()}><div class="err" role="alert">{recoveryError()}</div></Show>
               </section>
             </Show>
-            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} />
+            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} delivered={deliveredWaiting()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} />
             <For each={appendedQuestions()}>
               {(item) => {
                 const owner = () => item.request.sessionID !== sessionID
@@ -2105,9 +2450,31 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
-        <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
-          <ComposerPanel />
-        </div>
+        <Show when={live.data.todo.length || unreadMail()}>
+          <div class="session-followups">
+            <Show when={live.data.todo.length}>
+              <details class="session-followups-todos">
+                <summary>TODO <span>{live.data.todo.filter(item => item.status === "completed").length}/{live.data.todo.length}</span></summary>
+                <div class="session-followups-list"><TodoList todos={live.data.todo} /></div>
+              </details>
+            </Show>
+            <MailWakeBar unread={unreadMail()} status={mailWake.status()} editspace={location()?.name} session={sessionID}
+              onWoke={() => { void mailWake.refetch(); void refetchMail() }} />
+          </div>
+        </Show>
+        {/* This page's own origin is behind Cloudflare Access and its session expired (DD #897): not offline, not re-pair. */}
+        <Show when={accessState() === "sign-in"}>
+          <div class="access-sign-in" role="status" aria-live="polite">
+            <span>Sign-in expired. Drafts are kept; anything you send waits and goes once you sign in.</span>
+            <button type="button" onClick={() => window.location.reload()}>Sign in</button>
+          </div>
+        </Show>
+        {/* A read-only host (pinned-SSH Personal peer) takes no prompt, steer or reply from this page; its listener refuses them. */}
+        <Show when={!sessionHost.readOnly} fallback={<p class="dim session-read-only-note" data-read-only-note>Read only: this session is on <bdi dir="auto">{sessionHost.label}</bdi>. Reply from that host.</p>}>
+          <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
+            <ComposerPanel />
+          </div>
+        </Show>
         <SelfHandoffStatus handoff={selfHandoff} successor={(id) => <A href={hrefFor(id, directory)}><bdi dir="auto">{sessionLabel(id)}</bdi></A>} />
       </div>
 
@@ -2124,3 +2491,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 }
 
 const TEXT_KEYS = new Set(["h", "d", "u", "n", "p"])
+
+// Text selected in a field or the page: Ctrl+C copies it (Linux, Windows) instead of stopping.
+const hasSelectedText = (target: EventTarget | null) => {
+  if ((target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.selectionStart !== null && target.selectionStart !== target.selectionEnd) return true
+  return !!window.getSelection()?.toString()
+}

@@ -24,8 +24,8 @@ const reachable = (locator) => locator.evaluate((el) => {
 })
 try {
   await page.goto(`${preview.origin}/?surface=ops`, { waitUntil: "domcontentloaded", timeout: 300_000 })
-  const bar = page.locator(".desk-surface .surface-bar")
-  const actions = bar.locator(".surface-bar-actions > :is(a, button)")
+  const bar = page.locator(".surface-head")
+  const actions = bar.locator(".surface-head-actions > :is(a, button)")
   await expect(actions.last()).toBeVisible({ timeout: 120_000 })
   if (!(await page.locator(".desk-companion.overlay:not(.closed)").count())) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-companion.overlay:not(.closed)")).toHaveCount(1)

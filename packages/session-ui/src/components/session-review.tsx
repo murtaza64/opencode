@@ -581,6 +581,11 @@ export const SessionReview = (props: SessionReviewProps) => {
                           >
                             <Show when={expanded()}>
                               <Switch>
+                                <Match when={diff().omitted}>
+                                  <div data-slot="session-review-diff-omitted">
+                                    {i18n.t("ui.sessionTurn.diffs.omitted")}
+                                  </div>
+                                </Match>
                                 <Match when={!mounted() && !tooLarge()}>
                                   <div
                                     data-slot="session-review-diff-placeholder"

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode-ai/surface-bridge",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "PROTOCOL.md",
+    "src/frame.js",
+    "src/frame.d.ts",
+    "src/geometry.js",
+    "src/geometry.d.ts",
+    "src/marks.js",
+    "src/marks.d.ts",
+    "src/index.js",
+    "src/index.d.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./frame": {
+      "types": "./src/frame.d.ts",
+      "default": "./src/frame.js"
+    },
+    "./geometry": {
+      "types": "./src/geometry.d.ts",
+      "default": "./src/geometry.js"
+    },
+    "./marks": {
+      "types": "./src/marks.d.ts",
+      "default": "./src/marks.js"
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "pack": "bun pm pack"
+  }
+}

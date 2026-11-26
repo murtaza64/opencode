@@ -5,14 +5,18 @@ import { MailWakeEvidence } from "./mail-wake-evidence"
 import { MailParty } from "./mail-party"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { recipientSession, type MailNamer } from "../mail-names"
+import { dateTime } from "../local-time"
+import { mailLevel, mailUnread, outgoingMailTick } from "../mail-ticks"
 
 const timestamp = (value: string | number | null) => {
   if (value == null) return ""
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? String(value) : dateTime(date)
 }
 
-export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer; session?: string; replied?: boolean }) => {
+export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer; session?: string; replied?: boolean
+  /** The line under an unread incoming chip: this session's next wake, from the dashboard's wake state. */
+  wakeLine?: (message: MailMessage) => string | undefined }) => {
   const anchor = () => props.anchor ?? "mail"
   const origin = () => originOf(props.message.from, props.message.squadron, props.name)
   const from = (detail?: boolean) => <MailParty party={props.message.from} evidence={props.message.sender_session} name={props.name} detail={detail} />
@@ -32,11 +36,21 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
         text: `${senderText(props.message.from, props.message.sender_session, props.name, origin())} to ${props.name?.(props.message.to, recipientSession(props.message.deliveries, props.message.to))?.label ?? props.message.to}` }
   const wake = () => {
     const state = mailChipWake(props.message.deliveries, direction(), props.session)
+    // Passive mail the lane read with `es mail check` was delivered, not left behind: no "did not wake" cue.
+    if (state === "none" && direction() === "in" && props.message.receipt?.read) return { state: "joined" as const, label: "Read by this agent (es mail check)" }
+    if (state === "none" && direction() === "in" && props.message.deliveries.some((item) => item.session === props.session && mailLevel(item) === "presented"))
+      return { state: "joined" as const, label: "Read by this agent" }
     return state && { state, label: mailWakeLabel(state, direction() === "out" ? party().text : "this agent") }
   }
-  return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id} data-direction={direction()}>
+  // Outgoing: one tick for every recipient (lowest state wins); incoming: unread until this session's agent is shown it.
+  const tick = () => direction() === "out"
+    ? outgoingMailTick(props.message.deliveries, (recipient) => props.name?.(recipient, props.message.deliveries.find((item) => item.recipient === recipient)?.session ?? undefined)?.label ?? recipient)
+    : undefined
+  const unread = () => direction() === "in" && mailUnread(props.message.deliveries, props.session, props.message.receipt) ? { line: props.wakeLine?.(props.message) } : undefined
+  return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id} data-direction={direction()}
+    data-unread={unread() ? "true" : undefined}>
     <MailSummary id={props.message.id} direction={direction()} party={party().element} partyText={party().text}
-      purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)} wake={wake()}
+      purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)} wake={wake()} tick={tick()} unread={unread()}
       status={mailActionableStatus({ deliveries: props.message.deliveries, kind: props.message.kind, direction: direction(), replied: props.replied })} />
     <div class="mail-activity-details">
       <div class="mail-activity-body" dir="auto">{props.message.text}</div>

@@ -54,6 +54,7 @@
     "npmRebuild": false,
     "mac": {
       "identity": null,
+      "icon": "assets/icon.icns",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Editspace records only while you dictate into a message, and transcribes on this Mac."
       },

@@ -1,4 +1,16 @@
 .usage-page section { margin-block: 22px; }
+.ori-usage { overflow-wrap: anywhere; max-inline-size: 720px; }
+.ori-usage h2, .ori-usage h3 { margin: 0; }
+.ori-headline { display: flex; gap: 14px; align-items: baseline; margin-block: 16px 2px; }
+.ori-number { font-size: clamp(38px, 6vw, 52px); line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.ori-headline-label { font-size: 13px; line-height: 1.4; }
+.ori-source { margin-block: 6px 20px; }
+.ori-outside { display: flex; justify-content: space-between; gap: 8px 20px; flex-wrap: wrap; font-variant-numeric: tabular-nums; font-size: 14px; border-block-start: 1px solid var(--surface0); padding-block-start: 14px; }
+.ori-breakdown { margin-block: 10px 18px; font-size: 12px; color: var(--subtext0); }
+.ori-breakdown summary, .usage-details > summary { cursor: pointer; color: var(--accent); }
+.ori-usage > .home-source { margin-block: 4px; }
+.usage-details { margin-block: 26px; }
+.usage-details > summary { font-weight: 600; }
 .usage-eyebrow { color: var(--peach); font-size: 11px; }
 .usage-total { font-size: 28px; font-variant-numeric: tabular-nums; color: var(--text); margin-block: 6px 2px; }
 .usage-unpriced { color: var(--yellow); font-size: 12px; }
@@ -38,3 +50,9 @@
 .usage-sessions li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding-block: 4px; border-block-end: 1px solid var(--surface0); font-variant-numeric: tabular-nums; }
 .usage-sessions a { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 560px) { .usage-sessions li { grid-template-columns: minmax(0, 1fr) auto; } .usage-sessions li > .home-muted { grid-column: 1 / -1; } }
+.usage-quota-list { list-style: none; padding: 0; margin: 0; max-width: 520px; }
+.usage-quota-list li { padding-block: 6px; border-block-end: 1px solid var(--surface0); }
+.usage-quota-bar { display: grid; grid-template-columns: 9em 1fr auto auto; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
+.usage-quota-track { block-size: 6px; border-radius: 3px; background: var(--surface0); overflow: hidden; }
+.usage-quota-track i { display: block; block-size: 100%; background: var(--blue); }
+.usage-quota-bar.stale .usage-quota-track i { background: var(--overlay0); }

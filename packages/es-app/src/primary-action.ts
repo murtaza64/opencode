@@ -28,8 +28,8 @@ export const primaryAction = (input: {
   nudging: boolean
 }): PrimaryResolution => {
   if (input.hasContent) {
-    const action = input.busy ? input.keyboardTarget : "steer"
-    return { kind: "send", action, label: input.busy ? action[0]!.toUpperCase() + action.slice(1) : "Send", title: "" }
+    // Steer is the one default send (composer-steer-primary): Queue and Aside are explicit choices in the menu.
+    return { kind: "send", action: "steer", label: input.busy ? "Steer" : "Send", title: "" }
   }
   const nudge = { kind: "nudge" as const, label: input.nudging ? "Nudging…" : "Nudge", name: "Nudge the agent (empty message)",
     title: "Empty message: interrupt, then send a resume message" }

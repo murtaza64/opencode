@@ -1,11 +1,25 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.5",
+  "release": "2026-11-23.1",
   "items": [
     {
-      "title": "Personal sign-in survives restarts",
-      "detail": "Personal: sign-in now survives app restarts (session cookies kept for up to a week)."
+      "title": "Faster chats",
+      "detail": "Chats load a lighter page: images and long tool output load when shown or opened, not with every page. Style rules and background reads that slowed busy sessions are gone."
+    },
+    {
+      "title": "Mail list",
+      "detail": "Mail an agent already read, in a running turn or with es mail check, no longer counts as unread or shows a struck bolt; the unread count matches es mail. When there is nothing to re-offer, Wake now is hidden. Kind labels share one column, so titles line up."
+    },
+    {
+      "title": "Faster with a busy Core",
+      "detail": "The Front Desk and the activity list make fewer reads at a time, so chats and the sidebar stay responsive while Core is slow."
+    },
+    {
+      "title": "Wake state on mail",
+      "detail": "Unread mail shows a bolt instead of words: struck through and grey when no wake is scheduled, plain with a countdown when one is. Hover it for the full text."
     }
   ],
-  "limits": ["Only a normal quit keeps them; a crash or forced quit can still sign you out."]
+  "limits": [
+    "Agent photos are not shown yet; rows show initials."
+  ]
 }

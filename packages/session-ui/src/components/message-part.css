@@ -306,7 +306,7 @@
       color: var(--v2-text-text-muted);
     }
 
-    p:has(strong) {
+    p[data-strong] {
       margin-top: 24px;
       margin-bottom: 0;
 

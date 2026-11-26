@@ -127,9 +127,9 @@ try {
   const cliEnv = (session) => ({ ...process.env, EDITSPACES_ROOT: spaces, ES_ATTENTION_AUTH_FILE: path.join(spaces, "private", "attention.key"),
     ES_DASHBOARD_URL: dashboard.url, OPENCODE_URL: base, ES_DEFAULT_MODEL: "test/test-model", ...(session ? { EDITSPACE_AGENT_ID: `opencode:${session}` } : { EDITSPACE_AGENT_ID: "" }) })
   const run = (session, args, input) => execFileSync("python3", [es, ...args], { cwd: lane, env: cliEnv(session), input, encoding: "utf8", timeout: 60_000 })
-  const publish = (session, gate, title) => JSON.parse(run(session, ["attention", "publish", "--editspace", "fleet"], JSON.stringify({
+  const publish = (session, gate, title, options = [{ id: "project-map", label: "A — Project map" }, { id: "fleet-orbit", label: "B — Fleet orbit" }, { id: "time-weave", label: "C — Time weave" }]) => JSON.parse(run(session, ["attention", "publish", "--editspace", "fleet"], JSON.stringify({
     command_id: `publish:${gate}`, gate_key: gate, kind: "decision", title, context: "Synthetic private e2e request.",
-    options: [{ id: "project-map", label: "A — Project map" }, { id: "fleet-orbit", label: "B — Fleet orbit" }, { id: "time-weave", label: "C — Time weave" }],
+    options,
     recommendation: "project-map" }))).record
   const ledger = async (id) => (await (await fetch(`${dashboard.url}/api/attention/${id}?es=fleet`)).json()).record
   const sawInProvider = (text) => providerCalls.some((body) => body.includes(JSON.stringify(text).slice(1, -1)))
@@ -147,8 +147,9 @@ try {
   const answerInUi = async (id, text) => {
     await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
+    await card.getByRole("button", { name: "Type something…" }).click()
     await card.getByRole("textbox", { name: /Your answer|Note/ }).fill(text)
-    await card.getByRole("button", { name: "Send answer", exact: true }).click()
+    await card.getByRole("button", { name: "Send", exact: true }).click()
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
   }
 
@@ -214,12 +215,10 @@ try {
 
   // 4. A selected option alone is the answer: one delivery carrying the exact choice and no invented text.
   const mailFor = async (requestID) => (await readFile(path.join(root, ".es", "mail", "work.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line)).filter((item) => item.request_id === requestID)
-  const selectInUi = async (id, label, note) => {
+  const selectInUi = async (id, label) => {
     await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
-    await card.getByRole("radio", { name: label, exact: true }).check()
-    if (note) await card.getByRole("textbox", { name: /Note/ }).fill(note)
-    await card.getByRole("button", { name: `Send ${label}`, exact: true }).click()
+    await card.getByRole("button", { name: new RegExp(`^${label}`) }).click()
   }
   const pick = publish(sessionB, "issue:238:selection-only:v1", "Selection-only decision")
   const pickCalls = providerCalls.length
@@ -237,9 +236,17 @@ try {
   record(`SELECTION record=${pick.id} choice=time-weave text="" mail=1 presented to ${picked.delivery.session}`)
 
   // 5. Option plus a written note: both arrive verbatim in one delivery.
-  const mixedRecord = publish(sessionB, "issue:238:selection-note:v1", "Selection with note")
+  // Five options retain the radio + optional note path for a combined choice/text answer.
+  const mixedRecord = publish(sessionB, "issue:238:selection-note:v1", "Selection with note", [
+    { id: "project-map", label: "A — Project map" }, { id: "fleet-orbit", label: "B — Fleet orbit" }, { id: "time-weave", label: "C — Time weave" },
+    { id: "defer", label: "D — Defer" }, { id: "revisit", label: "E — Revisit" },
+  ])
   const NOTE = "B, but keep the legend from A"
-  await selectInUi(mixedRecord.id, "B — Fleet orbit", NOTE)
+  await openItem(mixedRecord.id)
+  const mixedCard = page.locator(`[data-attention-id="${mixedRecord.id}"]`)
+  await mixedCard.getByRole("radio", { name: "B — Fleet orbit", exact: true }).check()
+  await mixedCard.getByRole("textbox", { name: /Note/ }).fill(NOTE)
+  await mixedCard.getByRole("button", { name: "Send B — Fleet orbit", exact: true }).click()
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
   const mixedDone = await poll("mixed presentation", async () => { const value = await ledger(mixedRecord.id); return value.delivery_state === "presented" && value }, 60_000)
   assert.equal(mixedDone.answer.choice_id, "fleet-orbit")
@@ -266,13 +273,12 @@ try {
   assert.equal(lostEvents.filter((event) => event.action === "answer").length, 1)
   record(`RETRY record=${lost.id} lost response -> same command retried -> answers=1 mail=1`)
 
-  // 7. RTL: the single primary action stays reachable without horizontal scroll.
+  // 7. RTL: a direct option stays reachable without horizontal scroll.
   const rtl = publish(sessionB, "issue:238:rtl:v1", "قرار تجريبي")
   await openItem(rtl.id)
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
   const rtlCard = page.locator(`[data-attention-id="${rtl.id}"]`)
-  await rtlCard.getByRole("radio", { name: "A — Project map", exact: true }).check()
-  const button = await rtlCard.getByRole("button", { name: "Send A — Project map", exact: true }).boundingBox()
+  const button = await rtlCard.getByRole("button", { name: /^A — Project map/ }).boundingBox()
   assert(button && button.x >= 0 && button.x + button.width <= 1280, JSON.stringify(button))
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   record(`RTL primary action at x=${Math.round(button.x)} width=${Math.round(button.width)}; no horizontal scroll`)
